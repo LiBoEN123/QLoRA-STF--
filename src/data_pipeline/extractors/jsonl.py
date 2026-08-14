@@ -1,4 +1,4 @@
-"""JSON and JSONL extractors."""
+"""JSON 与 JSONL extractor。"""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ _TITLE_FIELDS = ("title",)
 
 
 def _gather_text_fields(obj: dict[str, Any]) -> dict[str, str]:
-    """Extract a permissive subset of text-like fields from a JSON object."""
+    """从 JSON 对象中抽取一组宽容的文本字段。"""
     bits: dict[str, str] = {}
     for field in _TEXT_FIELDS:
         if field in obj and isinstance(obj[field], str):
@@ -27,7 +27,7 @@ def _gather_text_fields(obj: dict[str, Any]) -> dict[str, str]:
 
 
 def _summarize_text(bits: dict[str, str]) -> str:
-    """Combine extracted text fields into a single readable string."""
+    """把抽取到的文本字段合并为单个可读字符串。"""
     if not bits:
         return ""
     if "question" in bits and "answer" in bits:
@@ -37,7 +37,7 @@ def _summarize_text(bits: dict[str, str]) -> str:
         )
     if "title" in bits and "content" in bits:
         return f"{bits['title']}\n\n{bits['content']}"
-    # Fallback: join whatever we found in stable order.
+    # 回退：按稳定顺序拼接所有找到的字段。
     parts = [bits[k] for k in _TEXT_FIELDS if k in bits]
     return "\n\n".join(parts)
 

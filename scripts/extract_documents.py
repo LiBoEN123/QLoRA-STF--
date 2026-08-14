@@ -30,7 +30,7 @@ def _configure_logging(log_file: Path, log_level: str) -> None:
     log_file.parent.mkdir(parents=True, exist_ok=True)
     root = get_logger()
     root.setLevel(log_level.upper())
-    # Reset handlers so repeated calls (e.g. in tests) don't double-log.
+    # 重置 handler，避免重复调用（比如测试中）造成日志重复输出。
     for h in list(root.handlers):
         root.removeHandler(h)
     formatter = logging.Formatter(

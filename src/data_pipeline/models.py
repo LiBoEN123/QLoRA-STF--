@@ -1,4 +1,4 @@
-"""Unified DocumentRecord data model used by all extractors."""
+"""所有 extractor 共用的 DocumentRecord 数据模型。"""
 
 from __future__ import annotations
 
@@ -23,11 +23,10 @@ SUPPORTED_SOURCE_TYPES: tuple[str, ...] = (
 
 @dataclass
 class DocumentRecord:
-    """A normalized record extracted from a source document.
+    """从源文档抽取出的标准化 record。
 
-    One physical file may produce multiple ``DocumentRecord`` instances
-    (for example one per PDF page, one per Word section, one per Excel sheet,
-    or one per JSON/JSONL line).
+    一个物理文件可能产出多条 ``DocumentRecord``（例如每个 PDF 页一条、
+    每个 Word 节一条、每个 Excel sheet 一条、或者每行 JSONL 一条）。
     """
 
     doc_id: str
@@ -44,7 +43,7 @@ class DocumentRecord:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_jsonable(self) -> dict[str, Any]:
-        """Return a JSON-serializable dict representation."""
+        """返回可 JSON 序列化的 dict 表示。"""
         return asdict(self)
 
 
@@ -58,10 +57,9 @@ def compute_doc_id(
     text: str = "",
     prefix: str = "doc",
 ) -> str:
-    """Compute a stable, deterministic ID for a document record.
+    """为一条 record 计算稳定、确定的 ID。
 
-    The same input always yields the same ``doc_id`` so that re-running
-    extraction does not produce duplicate records.
+    相同输入始终得到相同 ``doc_id``，因此重复运行抽取不会产生重复记录。
     """
     parts: list[str] = [source_path]
     if page_number is not None:
@@ -79,7 +77,7 @@ def compute_doc_id(
 
 
 def serialize_record(record: DocumentRecord) -> str:
-    """Serialize a record to a single JSONl line (UTF-8 safe)."""
+    """把 record 序列化为一行 JSONL（UTF-8 安全）。"""
     return json.dumps(
         record.to_jsonable(),
         ensure_ascii=False,

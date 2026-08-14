@@ -1,4 +1,4 @@
-"""Registry of extractors keyed by file suffix."""
+"""按文件后缀注册的 extractor 表。"""
 
 from __future__ import annotations
 
@@ -38,10 +38,10 @@ _register(JSONLExtractor())
 
 
 def supported_suffixes() -> list[str]:
-    """Return the sorted list of supported file suffixes."""
+    """返回排序后的所有支持文件后缀。"""
     return sorted(EXTRACTORS.keys())
 
 
 def get_extractor(path: Path) -> BaseExtractor | None:
-    """Return the extractor for ``path`` or ``None`` if unsupported."""
+    """返回 ``path`` 对应的 extractor；不支持则返回 None。"""
     return EXTRACTORS.get(path.suffix.lower())

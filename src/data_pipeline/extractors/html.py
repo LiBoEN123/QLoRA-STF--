@@ -1,4 +1,4 @@
-"""HTML extractor using BeautifulSoup4."""
+"""使用 BeautifulSoup4 的 HTML extractor。"""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ class HTMLExtractor(BaseExtractor):
         raw_html = self._read_text(path)
         soup = BeautifulSoup(raw_html, "html.parser")
 
-        # Remove noise that is never useful for downstream text.
+        # 去掉下游文本永远用不到的噪声标签。
         for tag in soup(["script", "style", "noscript"]):
             tag.decompose()
 

@@ -1,4 +1,4 @@
-"""Plain text (.txt) extractor."""
+"""纯文本 (.txt) extractor。"""
 
 from __future__ import annotations
 

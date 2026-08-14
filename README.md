@@ -1,16 +1,16 @@
 # QLoRA SFT 党建知识微调项目
 
 > 7B/8B 量级（Qwen3-8B）+ QLoRA + SFT 领域大模型微调数据流水线。
-> 当前阶段：**Phase 1 — 原始数据准备与统一文档抽取**。
+> 当前阶段：**Phase 2 — 文本清洗、结构恢复、质量过滤与去重**。
 
 本仓库会按阶段实现：
 
 1. **Phase 1**：原始数据准备 + 文档抽取（统一 JSONL + manifest）。
-2. Phase 2：文本清洗、去重、规范化。
+2. **Phase 2**：文本清洗、结构恢复、质量过滤、SimHash 去重。
 3. Phase 3：SFT 数据生成（QA / messages）。
 4. Phase 4：QLoRA SFT 训练。
 
-> 当前只实现 **Phase 1**。
+> Phase 1 + Phase 2 已实现。Phase 2 仍然**不会**生成 SFT 训练样本，不调用任何 LLM。
 
 ---
 
@@ -128,6 +128,99 @@ src/data_pipeline/
 
 ## 后续阶段（暂不实现）
 
-- Phase 2：文本清洗、MinHash/SimHash 去重、规范化。
 - Phase 3：生成 SFT messages、Train/Val/Test 划分。
 - Phase 4：Qwen3-8B + QLoRA SFT 训练。
+
+---
+
+## Phase 2 — Document Cleaning
+
+Phase 2 在 Phase 1 的统一 JSONL 上做确定性文本清洗，**不会**调用任何 LLM / Embedding / 向量数据库，也不会构造 SFT 训练样本。
+
+### 数据流
+
+```text
+data/raw/**
+        ↓
+Phase 1 Extract
+        ↓
+data/extracted/documents.jsonl
+        ↓
+Phase 2 Clean
+        ↓
+文本规范化 (Unicode / 空白 / 中文断行 / 标点)
+        ↓
+结构识别 (chapter / section / heading / subheading / list_item / paragraph / table / unknown)
+        ↓
+质量检测 (长度、中文比例、symbol 比例、garbled 判定)
+        ↓
+规则过滤 (rejected_documents.jsonl)
+        ↓
+重复检测 (Exact SHA256 + 64-bit SimHash)
+        ↓
+data/processed/documents_clean.jsonl
+data/processed/rejected_documents.jsonl
+data/processed/duplicates.jsonl
+data/processed/quality_report.json
+```
+
+### 运行
+
+```bash
+# 默认（读 data/extracted → 写 data/processed）
+python scripts/clean_documents.py
+
+# 自定义路径
+python scripts/clean_documents.py \
+  --input   data/extracted/documents.jsonl \
+  --output  data/processed/documents_clean.jsonl \
+  --rejected data/processed/rejected_documents.jsonl \
+  --duplicates data/processed/duplicates.jsonl \
+  --report  data/processed/quality_report.json \
+  --log-file logs/clean_documents.log \
+  --log-level INFO
+
+# 可选调参
+--min-length 5
+--max-length 20000
+--max-symbol-ratio 0.5
+--simhash-distance 3
+--disable-near-dedup
+```
+
+### 输出
+
+| 路径 | 含义 |
+| --- | --- |
+| `data/processed/documents_clean.jsonl` | 通过质量 + 去重的 records，附 `clean_text`、`structure_type`、`detected_section`、`quality`、`cleaning_actions` 等字段 |
+| `data/processed/rejected_documents.jsonl` | 被质量规则过滤的 records（含 `reject_reasons`） |
+| `data/processed/duplicates.jsonl` | exact + near duplicate，含 `canonical_doc_id` / `duplicate_doc_id` / `distance` |
+| `data/processed/quality_report.json` | 聚合统计（输入/输出/保留率、文本长度分布、结构计数、清洗动作、拒因、源文件分布等） |
+| `logs/clean_documents.log` | 详细运行日志 |
+
+### 关键规则
+
+- **确定性**：相同输入 + 相同配置 → 完全一致输出（不含时间戳）。
+- **可追溯**：Phase 1 原始 `text` 字段不会被覆盖；`clean_text` 单独保存。
+- **结构识别**：`第一章`/`第一节`/`一、`/`（一）`/`1.`/`（1）`/`①` 等正则在 *原始* 文本上运行，避免 NFKC 把全角括号 / 圈数字吃掉。
+- **SimHash**：64-bit，自实现 FNV-1a + CJK 字符 bigram，无外部依赖；按 top-16-bit 分桶避免 O(N²)。
+- **去重原则**：相同输入 → canonical record 稳定（按 `doc_id` 升序选首条）。
+- **保守清洗**：宁可少清洗也不误清洗；中文标点 `， 。 ！ ？ ； ： （ ）` 在 NFKC 之后会被还原为全角。
+- **Phase 2 仍不创建 SFT 训练样本**，不做 chunking，不调用任何 LLM。
+
+### Phase 2 模块结构
+
+```text
+src/data_pipeline/
+├── models.py            # Phase 1 DocumentRecord
+├── utils.py             # Phase 1 utilities
+├── extractor.py         # Phase 1 pipeline
+├── registry.py          # Phase 1 registry
+├── extractors/          # Phase 1 extractors
+└── cleaning/
+    ├── normalizer.py    # Unicode / 空白 / 标点 / 中文断行
+    ├── structure.py     # 结构识别 + section 上下文传播
+    ├── quality.py       # 质量指标 + header/footer 检测
+    ├── dedup.py         # Exact SHA256 + SimHash near-dedup
+    └── pipeline.py      # orchestrator (run_cleaning_pipeline)
+```

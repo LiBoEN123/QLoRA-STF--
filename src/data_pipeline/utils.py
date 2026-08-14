@@ -1,4 +1,4 @@
-"""Shared utilities for the document extraction pipeline."""
+"""文档抽取流水线的共享工具函数。"""
 
 from __future__ import annotations
 
@@ -12,16 +12,15 @@ LOGGER_NAME = "data_pipeline"
 
 
 def get_logger(name: str | None = None) -> logging.Logger:
-    """Return a configured logger for the data pipeline."""
+    """返回一个配置好的数据流水线 logger。"""
     return logging.getLogger(name or LOGGER_NAME)
 
 
 def to_relative_path(path: Path, root: Path) -> str:
-    """Return a POSIX-style path relative to ``root`` if possible.
+    """尽可能返回 ``path`` 相对于 ``root`` 的 POSIX 风格路径。
 
-    Falls back to the absolute path if ``path`` is not under ``root``.
-    The return value uses forward slashes so output is portable across
-    Windows / Linux / WSL.
+    如果 ``path`` 不在 ``root`` 下，则回退为绝对路径。
+    返回值统一使用正斜杠，保证 Windows / Linux / WSL 间可移植。
     """
     try:
         rel = path.resolve().relative_to(root.resolve())
@@ -31,7 +30,7 @@ def to_relative_path(path: Path, root: Path) -> str:
 
 
 def calculate_file_sha256(path: Path, chunk_size: int = 1 << 20) -> str:
-    """Compute the SHA256 hex digest of a file's contents."""
+    """计算文件内容的 SHA256 十六进制摘要。"""
     sha = hashlib.sha256()
     with path.open("rb") as fh:
         while True:
@@ -43,12 +42,12 @@ def calculate_file_sha256(path: Path, chunk_size: int = 1 << 20) -> str:
 
 
 def normalize_text(text: str) -> str:
-    """Apply minimal, lossless text normalization.
+    """对文本做最小化、无损的规范化。
 
-    - Unicode ``NFKC`` normalization.
-    - Translate stray carriage returns to newlines.
-    - Strip trailing whitespace on each line.
-    - Collapse runs of more than two blank lines.
+    - Unicode ``NFKC`` 规范化。
+    - 将孤立的回车转为换行。
+    - 去掉每行行尾空白。
+    - 折叠 3 行以上的连续空行为 2 行。
     """
     if not text:
         return ""
@@ -56,14 +55,14 @@ def normalize_text(text: str) -> str:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     cleaned_lines = [line.rstrip() for line in text.split("\n")]
     text = "\n".join(cleaned_lines)
-    # Collapse 3+ blank lines down to 2.
+    # 把 3 行及以上的连续空行折叠为 2 行。
     while "\n\n\n\n" in text:
         text = text.replace("\n\n\n\n", "\n\n\n")
     return text.strip()
 
 
 def is_meaningful_text(text: str, min_chars: int = 1) -> bool:
-    """Return True if a piece of text is non-empty after stripping."""
+    """如果文本 strip 后非空则返回 True。"""
     if not text:
         return False
     return len(text.strip()) >= min_chars
@@ -73,7 +72,7 @@ def iter_supported_files(
     root: Path,
     suffixes: Iterable[str],
 ) -> list[Path]:
-    """Recursively find files under ``root`` whose suffix is supported."""
+    """递归查找 ``root`` 下后缀受支持的所有文件。"""
     suffixes_lc = {s.lower() for s in suffixes}
     if not root.exists():
         return []

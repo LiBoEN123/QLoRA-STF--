@@ -1,4 +1,4 @@
-"""Base class and result type for document extractors."""
+"""文档 extractor 的基类与结果类型。"""
 
 from __future__ import annotations
 
@@ -13,19 +13,19 @@ if TYPE_CHECKING:
 
 @dataclass
 class ExtractionResult:
-    """The outcome of extracting a single file."""
+    """单个文件抽取的结果。"""
 
     records: list["DocumentRecord"] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
 
 class BaseExtractor(ABC):
-    """Abstract base class for all extractors."""
+    """所有 extractor 的抽象基类。"""
 
-    #: Source type label stored in ``DocumentRecord.source_type``.
+    #: 存入 ``DocumentRecord.source_type`` 的类型标签。
     source_type: str = ""
 
-    #: Lower-case file suffixes this extractor handles (e.g. ``.pdf``).
+    #: 该 extractor 处理的小写文件后缀（如 ``.pdf``）。
     suffixes: tuple[str, ...] = ()
 
     @abstractmethod
@@ -36,17 +36,16 @@ class BaseExtractor(ABC):
         relative_path: str,
         file_sha256: str,
     ) -> ExtractionResult:
-        """Extract structured records from ``path``.
+        """从 ``path`` 抽取结构化 records。
 
         Parameters
         ----------
         path:
-            Absolute path to the source file.
+            源文件的绝对路径。
         relative_path:
-            Project-relative path used for stable ``doc_id`` generation
-            and for the ``source_path`` field.
+            项目内相对路径，用于稳定生成 ``doc_id`` 与填充 ``source_path``。
         file_sha256:
-            Pre-computed SHA256 digest of the file contents.
+            文件内容的预计算 SHA256 摘要。
         """
 
     @classmethod

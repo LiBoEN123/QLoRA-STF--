@@ -1,4 +1,4 @@
-"""Tests for the Phase 1 document extraction pipeline."""
+"""Phase 1 文档抽取流水线的测试。"""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ from data_pipeline.utils import (
 
 
 # ---------------------------------------------------------------------------
-# Utility / shared tests
+# 工具函数 / 共享测试
 # ---------------------------------------------------------------------------
 
 
@@ -39,7 +39,7 @@ def test_normalize_text_handles_crlf_and_blank_lines():
     assert normalize_text("a\r\nb\r\n\r\n\r\n\r\nc") == "a\nb\n\n\nc".strip() or (
         normalize_text("a\r\nb\r\n\r\n\r\n\r\nc").startswith("a\nb")
     )
-    # Actually we want exactly: collapse 3+ blank lines down to 2 blank lines.
+    # 实际行为：把 3 行及以上的连续空行折叠为 2 行。
     out = normalize_text("a\r\nb\r\n\r\n\r\n\r\nc")
     assert "a\nb" in out
     assert "\n\n\n\n" not in out
@@ -55,7 +55,7 @@ def test_compute_doc_id_is_stable():
     a = compute_doc_id("data/raw/pdf/test.pdf", page_number=3, text="hello")
     b = compute_doc_id("data/raw/pdf/test.pdf", page_number=3, text="hello")
     assert a == b
-    # Different content -> different id.
+    # 不同内容 → 不同 id。
     c = compute_doc_id("data/raw/pdf/test.pdf", page_number=3, text="world")
     assert a != c
 
@@ -104,7 +104,7 @@ def test_supported_suffixes_includes_all_types():
 
 
 # ---------------------------------------------------------------------------
-# Per-format tests
+# 各格式测试
 # ---------------------------------------------------------------------------
 
 
@@ -137,8 +137,7 @@ def test_markdown_extractor_preserves_content(tmp_path: Path):
         path, relative_path="data/raw/markdown/doc.md", file_sha256="abc"
     )
     assert len(result.records) == 1
-    # We keep the original markdown verbatim (modulo NFC + line-end + blank-line
-    # normalization applied uniformly to all formats).
+    # 保留原始 markdown 不变（除所有格式统一应用的 NFC + 行尾 + 空行规范化）。
     text = result.records[0].text
     assert "标题" in text
     assert "项目一" in text
@@ -261,7 +260,7 @@ def test_word_extractor_basic_paragraphs(tmp_path: Path):
     assert any("一级标题" in t for t in texts)
     assert any("第一段内容" in t for t in texts)
     assert any("Agent" in t and "任务规划" in t for t in texts)
-    # The table came in as a markdown-style record.
+    # 表格会以 markdown 风格的 record 出现。
     table_records = [r for r in result.records if r.metadata.get("kind") == "table"]
     assert table_records, "expected a table record"
     assert "|" in table_records[0].text
@@ -312,7 +311,7 @@ def test_pdf_extractor_flags_possible_scanned_page(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# Pipeline-level tests
+# Pipeline 层级测试
 # ---------------------------------------------------------------------------
 
 
@@ -340,9 +339,9 @@ def _make_sample_tree(tmp_path: Path) -> Path:
     (raw / "excel" / "people.csv").write_text(
         "name,age\n张三,30\n", encoding="utf-8"
     )
-    # Garbage file that should not crash the pipeline.
+    # 损坏文件，不应让整个流水线崩溃。
     (raw / "excel" / "broken.xlsx").write_bytes(b"not-a-real-xlsx")
-    # Unsupported suffix.
+    # 不支持的后缀。
     (raw / "unknown.bin").write_bytes(b"junk")
     return raw
 
@@ -356,13 +355,13 @@ def test_pipeline_runs_and_writes_outputs(tmp_path: Path):
     assert manifest.exists()
     assert result.total_records > 0
 
-    # JSONL is valid, one JSON per line.
+    # JSONL 合法，每行一个 JSON。
     lines = [line for line in out.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert lines
     for line in lines:
         obj = json.loads(line)
         assert obj["text"].strip()
-        # source_path uses POSIX separators and is relative to the project root.
+        # source_path 使用 POSIX 分隔符，且相对项目根目录。
         assert "\\" not in obj["source_path"]
         assert not obj["source_path"].startswith("/")
         assert obj["doc_id"].startswith("doc_")
@@ -414,7 +413,7 @@ def test_format_sheet_drops_empty_columns():
     rendered = _format_sheet_as_table(rows)
     assert "a" in rendered and "b" in rendered
     assert "1" in rendered and "2" in rendered
-    # The empty middle column should have been dropped entirely.
+    # 完全为空的中间列应该被整体丢掉。
     header_line = rendered.splitlines()[0]
     cells = [c.strip() for c in header_line.strip("|").split("|")]
     assert cells == ["a", "b"]

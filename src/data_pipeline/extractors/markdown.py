@@ -1,4 +1,4 @@
-"""Markdown extractor."""
+"""Markdown extractor。"""
 
 from __future__ import annotations
 
@@ -41,8 +41,7 @@ class MarkdownExtractor(BaseExtractor):
 
     @staticmethod
     def _read_text(path: Path) -> str:
-        # Markdown is normally UTF-8. Strip a BOM if present and fall back
-        # to a couple of common encodings on failure.
+        # Markdown 通常是 UTF-8；先剥掉 BOM，失败时回退到几种常见编码。
         for encoding in ("utf-8-sig", "utf-8", "gb18030", "latin-1"):
             try:
                 return path.read_text(encoding=encoding)

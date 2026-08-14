@@ -1,4 +1,4 @@
-"""Excel and CSV extractors."""
+"""Excel 与 CSV extractor。"""
 
 from __future__ import annotations
 
@@ -11,10 +11,9 @@ from .base import BaseExtractor, ExtractionResult
 
 
 def _format_sheet_as_table(rows: list[list[str]]) -> str:
-    """Render a 2D list of cell strings as a Markdown-style table.
+    """把二维单元格字符串列表渲染为 Markdown 风格的表格。
 
-    Empty rows and entirely-empty columns are skipped to reduce noise
-    without altering the meaning of the kept cells.
+    完全为空的行 / 列会被跳过，以减少噪声且不改变保留单元格的含义。
     """
     if not rows:
         return ""
@@ -24,7 +23,7 @@ def _format_sheet_as_table(rows: list[list[str]]) -> str:
     width = max(len(r) for r in rows)
     rows = [r + [""] * (width - len(r)) for r in rows]
 
-    # Drop columns that are entirely empty.
+    # 丢掉整列都为空白的列。
     keep_cols: list[int] = []
     for c in range(width):
         if any(rows[r][c].strip() for r in range(len(rows))):
@@ -63,7 +62,7 @@ class ExcelExtractor(BaseExtractor):
             ) from exc
 
         result = ExtractionResult()
-        # ``data_only=True`` gives us formula results instead of formulas.
+        # ``data_only=True`` 让我们拿到公式的计算结果而非公式本身。
         workbook = load_workbook(filename=str(path), data_only=True, read_only=True)
         try:
             for sheet_name in workbook.sheetnames:
@@ -107,7 +106,7 @@ class CSVExtractor(BaseExtractor):
         relative_path: str,
         file_sha256: str,
     ) -> ExtractionResult:
-        # Sniff encoding; fall back to UTF-8 if detection fails.
+        # 嗅探编码；检测失败时回退到 UTF-8。
         text = self._read_text(path)
         rows = self._parse_csv(text)
         rendered = _format_sheet_as_table(rows)

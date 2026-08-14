@@ -1,4 +1,4 @@
-"""Word (.docx) extractor using python-docx."""
+"""使用 python-docx 的 Word (.docx) extractor。"""
 
 from __future__ import annotations
 
@@ -25,10 +25,10 @@ def _is_heading_style(style_name: str) -> bool:
 
 
 def _format_table_as_text(rows: list[list[str]]) -> str:
-    """Render a 2D list of cell strings as a Markdown-style table."""
+    """把二维单元格字符串列表渲染为 Markdown 风格的表格。"""
     if not rows:
         return ""
-    # Strip fully-empty rows.
+    # 去掉完全为空的行。
     rows = [r for r in rows if any(cell.strip() for cell in r)]
     if not rows:
         return ""
@@ -70,8 +70,7 @@ class WordExtractor(BaseExtractor):
 
         document = Document(str(path))
 
-        # Walk the document body in order so tables and paragraphs keep
-        # their natural interleaving.
+        # 按顺序遍历文档 body，使段落和表格保持原本的交错顺序。
         body = document.element.body
         para_index = 0
         table_index = 0
@@ -86,7 +85,7 @@ class WordExtractor(BaseExtractor):
                 style_name = paragraph.style.name if paragraph.style else ""
                 if _is_heading_style(style_name) and is_meaningful_text(text):
                     current_section = text
-                    # Emit the heading itself as a record so it isn't lost.
+                    # 把标题本身也作为一条 record 输出，避免丢失。
                     record_counter += 1
                     record = DocumentRecord(
                         doc_id=compute_doc_id(

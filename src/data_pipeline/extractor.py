@@ -1,4 +1,4 @@
-"""Orchestration layer that runs extractors over a directory tree."""
+"""在目录树上运行 extractor 的编排层。"""
 
 from __future__ import annotations
 
@@ -84,7 +84,7 @@ class PipelineResult:
 
 
 def _atomic_write_jsonl(path: Path, lines: list[str]) -> None:
-    """Write the JSONL atomically (tmp file + os.replace)."""
+    """以原子方式写入 JSONL（临时文件 + os.replace）。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(
         prefix=path.name + ".",
@@ -104,6 +104,7 @@ def _atomic_write_jsonl(path: Path, lines: list[str]) -> None:
 
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+    """以原子方式写入 JSON。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(
         prefix=path.name + ".",

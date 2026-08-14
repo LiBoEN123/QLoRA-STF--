@@ -1,4 +1,4 @@
-"""PDF extractor using PyMuPDF (fitz)."""
+"""使用 PyMuPDF (fitz) 的 PDF extractor。"""
 
 from __future__ import annotations
 
@@ -34,16 +34,14 @@ class PDFExtractor(BaseExtractor):
         with fitz.open(path) as doc:
             for page_index in range(doc.page_count):
                 page = doc.load_page(page_index)
-                # ``get_text("text")`` returns the textual layer only.
+                # ``get_text("text")`` 只返回文本层。
                 raw_text = page.get_text("text") or ""
                 text = normalize_text(raw_text)
-                page_number = page_index + 1  # 1-based for humans
+                page_number = page_index + 1  # 给人类看的 1-based 页码
 
                 if not is_meaningful_text(text):
                     scanned_pages.append(page_number)
-                    # Still emit a placeholder record so that downstream
-                    # tooling can see the page exists, but mark it as
-                    # possibly scanned via metadata.
+                    # 仍然输出占位 record 让下游看到该页存在，但用 metadata 标记为疑似扫描页。
                     record = DocumentRecord(
                         doc_id=compute_doc_id(
                             relative_path,
@@ -79,7 +77,7 @@ class PDFExtractor(BaseExtractor):
 
         if scanned_pages:
             result.warnings.append("possible_scanned_pdf")
-            # Attach the affected pages per-record for downstream visibility.
+            # 把受影响的页号回填到对应 record 的 metadata，便于下游可见。
             for record in result.records:
                 if (
                     record.page_number is not None
