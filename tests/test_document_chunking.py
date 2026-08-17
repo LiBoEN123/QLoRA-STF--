@@ -171,11 +171,11 @@ def test_detect_chinese_numbered_with_mark():
     assert cand.confidence == "medium"
 
 
-def test_detect_loose_question_word_no_prefix_is_low():
-    """无编号 + 强疑问词 + 问号 → low。"""
+def test_detect_loose_question_word_no_prefix_is_medium():
+    """纯段落问句（无编号 + 强疑问词 + 问号）→ medium（已提升，不再走 low + recovery）。"""
     cand = detect_question_candidate({"clean_text": "什么是党组织？"})
     assert cand.is_candidate is True
-    assert cand.confidence == "low"
+    assert cand.confidence == "medium"
 
 
 def test_question_word_set_includes_expected_words():
@@ -275,14 +275,15 @@ def test_pair_unpaired_question_recorded():
 
 
 def test_pair_low_confidence_not_auto_paired():
-    """low confidence 问题不会被自动配对（即便默认 min=medium）。"""
+    """没有问号、也没有编号的纯陈述句（即使含疑问词）不会被识别为候选。"""
     recs = [
-        _make_record(1, "什么是党组织？", structure_type="paragraph"),
+        _make_record(1, "如何做好发展党员工作", structure_type="paragraph"),
         _make_record(2, "党组织是...", structure_type="paragraph"),
     ]
     paired, unpaired = pair_questions_with_answers(recs, min_confidence="medium")
     assert len(paired) == 0
-    assert len(unpaired) == 1
+    # 重构后只保留 high / medium 两个真实候选级别；无问号的陈述句直接不入审计。
+    assert len(unpaired) == 0
 
 
 def test_pair_numbered_answer_list_not_treated_as_questions():
@@ -557,3 +558,140 @@ def test_config_validation():
         ChunkingConfig(overlap_chars=1500, max_chars=1000)
     with pytest.raises(ValueError):
         ChunkingConfig(faq_min_confidence="bogus")
+
+
+# ---------------------------------------------------------------------------
+# 重构测试：统一的 QuestionDetector
+# - paragraph FAQ（无编号 + 短 + 问号 + 疑问词 → medium）
+# - sticky-number FAQ（开头 1~3 位数字紧接中文 → medium）
+# - 正常年份 / 年龄 / 金额不能被 strip
+# - paragraph question 必须终止上一题的答案范围
+# - no_answer 必须自然落入 unpaired，不能伪造答案
+# ---------------------------------------------------------------------------
+
+
+def test_detect_paragraph_question_is_medium():
+    """纯段落短问句无编号 → medium（不再经过 low 后处理）。"""
+    cand = detect_question_candidate(
+        {"clean_text": "如何确定基层党组织的名称？"}
+    )
+    assert cand.is_candidate is True
+    assert cand.confidence == "medium"
+
+
+def test_detect_sticky_number_is_medium():
+    """开头 1~3 位数字紧接中文、剥离后是问句 → medium。"""
+    cand = detect_question_candidate(
+        {"clean_text": "87哪些单位一般不设立党组？"}
+    )
+    assert cand.is_candidate is True
+    assert cand.confidence == "medium"
+    # 解析后的 question_text 应该剥离粘连题号；raw 保留原文。
+    assert cand.question_text == "哪些单位一般不设立党组？"
+    assert cand.raw_question_text == "87哪些单位一般不设立党组？"
+
+
+@pytest.mark.parametrize(
+    "text, preserved_prefix",
+    [
+        ("2026年党员教育工作重点是什么？", "2026"),
+        ("18岁以上人员能否申请入党？", "18"),
+        ("100万元党费如何管理？", "100"),
+    ],
+)
+def test_detect_does_not_strip_year_age_money(text, preserved_prefix):
+    """正常数字开头的段落问题不能 strip 掉数字。"""
+    cand = detect_question_candidate({"clean_text": text})
+    assert cand.is_candidate is True
+    assert cand.confidence == "medium"
+    assert cand.question_text == text
+    assert cand.raw_question_text == text
+    assert preserved_prefix in cand.question_text
+
+
+def test_pair_paragraph_question_terminates_previous():
+    """中间夹一道段落问句时，前面那道 FAQ 的答案必须在这里终止。"""
+    recs = [
+        _make_record(1, "1.什么是A？", structure_type="list_item"),
+        _make_record(2, "A第一段。", structure_type="paragraph"),
+        _make_record(3, "如何办理B？", structure_type="paragraph"),
+        _make_record(4, "B答案。", structure_type="paragraph"),
+        _make_record(5, "2.什么是C？", structure_type="list_item"),
+        _make_record(6, "C答案。", structure_type="paragraph"),
+    ]
+    paired, _ = pair_questions_with_answers(recs, min_confidence="medium")
+    assert len(paired) == 3
+    a, b, c = paired
+    # A 的答案只到 A第一段，不能吞 B。
+    assert "A第一段" in a.answer_text
+    assert "如何办理B" not in a.answer_text
+    assert "B答案" not in a.answer_text
+    # B 是被恢复的段落 FAQ。
+    assert b.question_text == "如何办理B？"
+    assert "B答案" in b.answer_text
+    # C 是结构化 FAQ，与 B 不串扰。
+    assert c.question_text == "什么是C？"
+    assert "C答案" in c.answer_text
+
+
+def test_pair_no_answer_does_not_invent():
+    """段落问句紧接 heading → 无答案，不能伪造。"""
+    recs = [
+        _make_record(1, "如何办理该业务？", structure_type="paragraph"),
+        _make_record(
+            2,
+            "二、新章节",
+            structure_type="heading",
+            detected_section="二、新章节",
+            detected_heading="二、新章节",
+        ),
+    ]
+    paired, unpaired = pair_questions_with_answers(recs, min_confidence="medium")
+    assert len(paired) == 0
+    # detector 把它识别为 medium，但因为无答案，归入 unpaired。
+    assert len(unpaired) == 1
+    assert unpaired[0].confidence == "medium"
+    assert unpaired[0].reason  # 非空，能溯源
+
+
+def test_pair_sticky_number_gets_correct_strip_and_pair():
+    recs = [
+        _make_record(1, "87哪些单位一般不设立党组？", structure_type="paragraph"),
+        _make_record(2, "（1）领导机关中的党员领导成员不足3人的。", structure_type="list_item"),
+        _make_record(3, "（2）与党的机关合并设立或者合署办公的。", structure_type="list_item"),
+    ]
+    paired, _ = pair_questions_with_answers(recs, min_confidence="medium")
+    assert len(paired) == 1
+    p = paired[0]
+    assert p.confidence == "medium"
+    assert p.question_text == "哪些单位一般不设立党组？"
+    assert p.raw_question_text == "87哪些单位一般不设立党组？"
+    assert "（1）" in p.answer_text and "（2）" in p.answer_text
+
+
+def test_pipeline_runs_with_real_data_and_produces_faqs(tmp_path: Path):
+    """端到端跑 Phase 2 → Phase 3 真实数据，FAQ 总量大致不退化。"""
+    real_input = Path("data/processed/documents_clean.jsonl").resolve()
+    if not real_input.exists():
+        pytest.skip("真实清洗数据缺失，跳过回归")
+    out_units = tmp_path / "units.jsonl"
+    out_chunks = tmp_path / "chunks.jsonl"
+    out_report = tmp_path / "report.json"
+    result = run_chunking_pipeline(
+        real_input,
+        out_units,
+        out_chunks,
+        out_report,
+        config=ChunkingConfig(),
+    )
+    units = [
+        json.loads(l) for l in out_units.read_text(encoding="utf-8").splitlines()
+    ]
+    faq_units = [u for u in units if u["unit_type"] == "faq"]
+    # 重构不要求与旧版 SHA256 严格一致；FAQ 总量应在原 1327 附近。
+    assert len(faq_units) >= 1300
+    # 不能出现明显膨胀（避免误配）。
+    assert len(faq_units) <= 1400
+    # 高置信度 FAQ 必须保留绝大多数原 1318 条结构化结果。
+    high = sum(1 for u in faq_units if u.get("faq_confidence") == "high")
+    assert high >= 1300

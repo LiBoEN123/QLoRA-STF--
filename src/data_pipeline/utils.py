@@ -1,12 +1,19 @@
-"""文档抽取流水线的共享工具函数。"""
+"""文档抽取流水线的共享工具函数。
+
+该模块同时是 Phase 1 / Phase 2 / Phase 3 唯一的原子 IO 入口。任何流水线
+（抽取、清洗、chunking）都不应再各自重复实现 ``_atomic_write_*``、``_load_records``。
+"""
 
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
+import os
+import tempfile
 import unicodedata
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Dict, Iterable, List, Sequence
 
 LOGGER_NAME = "data_pipeline"
 
@@ -83,3 +90,54 @@ def iter_supported_files(
         if path.suffix.lower() in suffixes_lc:
             files.append(path)
     return files
+
+
+# ---------------------------------------------------------------------------
+# 原子 IO：Phase 1/2/3 共用，输出永远写到 ``os.replace`` 之后才可见
+# ---------------------------------------------------------------------------
+
+
+def atomic_write_jsonl(path: Path, lines: Sequence[str]) -> None:
+    """把若干 JSONL 行原子写入 ``path``：先写临时文件，成功后 ``os.replace``。
+
+    调用方传入已序列化好的字符串列表（含或不含尾部 ``\\n`` 都会被规范化）。
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+            for line in lines:
+                fh.write(line)
+                if not line.endswith("\n"):
+                    fh.write("\n")
+        os.replace(tmp, path)
+    except Exception:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
+def atomic_write_json(path: Path, payload: Dict[str, Any]) -> None:
+    """把 ``payload`` 原子写入 ``path``，使用缩进 + 稳定 key 排序。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False, indent=2, sort_keys=True)
+        os.replace(tmp, path)
+    except Exception:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
+def load_jsonl_records(path: Path) -> List[Dict[str, Any]]:
+    """读取 JSONL，每行解析为 dict；空行跳过；解析失败抛 ``ValueError``。"""
+    records: List[Dict[str, Any]] = []
+    with path.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            records.append(json.loads(line))
+    return records

@@ -1,7 +1,7 @@
 # QLoRA SFT 党建知识微调项目
 
 > 7B/8B 量级（Qwen3-8B）+ QLoRA + SFT 领域大模型微调数据流水线。
-> 当前阶段：**Phase 2 — 文本清洗、结构恢复、质量过滤与去重**。
+> 当前阶段：**Phase 3 — Semantic Unit 恢复 + FAQ 配对 + 结构感知 Chunking**。
 
 本仓库会按阶段实现：
 
@@ -12,6 +12,8 @@
 5. Phase 5：QLoRA SFT 训练。
 
 > Phase 1 + Phase 2 + Phase 3 已实现。Phase 3 仍然**不会**生成 SFT 训练样本，不调用任何 LLM。
+> Phase 3 在历史迭代中曾为了恢复少量边界 FAQ 临时引入"Phase 3.5"的额外恢复流程，
+> 当前已合并回收——仅保留唯一的"一次检测 + 一次配对"主链。
 
 ---
 
@@ -247,18 +249,46 @@ data/processed/documents_clean.jsonl
         ↓
 Phase 3 Restore source order
         ↓
-FAQ question candidate detection
+detect_question_candidate         ← 一个 detector：编号 / 段落 / 粘连题号
         ↓
-FAQ answer pairing
+pair_questions_with_answers       ← 一个 pairer：高 / 中 一次配对
         ↓
-Semantic unit construction
+build_semantic_units              ← 一个 semantic unit 构造器
         ↓
-Structure-aware chunking
+build_chunks
         ↓
 data/chunks/semantic_units.jsonl
 data/chunks/chunks.jsonl
 data/chunks/chunk_report.json
+data/chunks/faq_audit.jsonl       ← 仅观察：未配对的候选
 ```
+
+### FAQ 主链（唯一）
+
+```text
+run_chunking_pipeline
+   ↓
+restore_source_order                          # ordering.py
+   ↓
+pair_questions_with_answers                   # faq.py
+   │   └── detect_question_candidate          # faq.py
+   ↓
+build_semantic_units                          # semantic_units.py
+   ├── _build_faq_units
+   └── _build_other_units
+   ↓
+_build_chunks                                 # pipeline.py
+   ↓
+build_report / build_audit_entries            # report.py / audit.py
+```
+
+历史上曾存在的"Phase 3.5 段落 FAQ 二次恢复"已合并回收。当前 detector 一次性覆盖：
+
+* **结构化编号**（`1.` / `1、` / `①` / `一、`）→ high（带问号）/ medium（带疑问词 / 中文编号+问号）
+* **粘连题号**（开头 1~3 位数字紧接中文，不接单位字）→ medium
+* **段落短问句**（长度合理 + `?` + 强疑问词）→ medium
+
+不再维护两条 pipeline 不再二次拆分。
 
 ### 运行
 
@@ -287,39 +317,49 @@ python scripts/build_chunks.py \
 | `data/chunks/semantic_units.jsonl` | 语义单元（FAQ / heading / paragraph_group / list_group / standalone），含 `unit_id`、`unit_type`、`question_text`、`answer_text`、`source_doc_ids`、`source_record_indices` |
 | `data/chunks/chunks.jsonl` | 最终 chunk（faq / heading / text），含 `chunk_id`、`source_unit_ids`、`source_doc_ids`、`source_record_indices` |
 | `data/chunks/chunk_report.json` | 聚合统计：FAQ 配对数、置信度分布、长度分布、split / overlap 统计、可追溯性 |
+| `data/chunks/faq_audit.jsonl` | 审计旁路：未配对的候选（含已识别但无答案 / 低置信度），仅供人工核对 |
 | `logs/build_chunks.log` | 详细运行日志 |
 
 ### 关键规则
 
-- **源序恢复**：Phase 2 按 `doc_id` 升序输出，但 `doc_id` 不反映源文档顺序。Phase 3 使用 `(source_path, page_number, sheet_name, record_index, doc_id)` 五元组**稳定排序**重建原文顺序。
-- **Question detection**：高置信度 = 阿拉伯数字/圈数字编号 + 问号；中置信度 = 阿拉伯数字/圈数字编号 + 强疑问词；中文编号 + 问号 = 中置信度；仅有强疑问词 = 低置信度。
-- **Precision > Recall**：自动配对只接受 high / medium 置信度；`（1）`/`（2）` 全角括号枚举不会误识别为问题；low 置信度保留为 `unpaired_questions` 不参与自动配对。
+- **一个 Detection Path + 一个 Pairing Path**。所有候选（结构化 / 粘连 / 段落）共用 `detect_question_candidate`，共用 `pair_questions_with_answers`。
+- **精确量化后缀保护**：`100万元党费如何管理？` / `2026年党员教育工作重点是什么？` / `18岁以上人员能否申请入党？` 这类"数字+单位"的常见前缀**不会**被当作粘连题号剥离，规则以紧跟数字后的字符是否为常见单位字（万 / 元 / 岁 / 年 / % / 月 / 日 / 个 / 多 / 余）来区分。
+- **Precision > Recall**：自动配对只接受 high / medium 置信度；`（1）` / `（2）` 全角括号枚举不会误识别为问题。
+- **段落 FAQ 终止上一题**：检测器对段落短问句直接升级为 medium，因此上一道 FAQ 的答案范围会在此处自然终止；不再需要后处理拆分。
 - **FAQ 一对一**：一道 FAQ = 一个 `SemanticUnit` = 一个 `chunk`，不做切分；短 FAQ 也不与下一道合并。
 - **结构边界硬性**：chapter / section / heading / subheading 是硬边界，跨结构正文绝不合并。
 - **可追溯**：`unit_id` / `chunk_id` 由 SHA256(输入内容) 决定性生成；每个 chunk 都保留 `source_unit_ids`、`source_doc_ids`、`source_record_indices`，可一路回溯到原始 Phase 1 `DocumentRecord` 与源文件。
 - **确定性**：相同输入 + 相同配置 → SHA256 一致的输出文件，report 不含任何时间戳 / 当前时间字段。
 - **不调用 LLM / 不生成 SFT messages / 不训练模型**：Phase 3 严格止步于「数据结构恢复 + 结构化 chunking」。
+- **Audit 不参与业务控制流**：`pair_questions_with_answers` 直接返回 `unpaired` 候选，audit 只是把这份数据序列化为 JSONL，**不会**反过来驱动 SemanticUnit 重构。
+- **公共 IO**：所有原子写文件逻辑（`atomic_write_json` / `atomic_write_jsonl` / `load_jsonl_records`）只维护于 `src/data_pipeline/utils.py`，Phase 2 / Phase 3 全部复用。
 - **中文注释**：从 Phase 3 开始，所有新增/修改代码的注释、docstring、CLI 参数说明、日志内容均优先使用中文；类名 / 函数名 / 字段名 / JSON key / CLI 参数继续使用规范英文命名。
 
 ### Phase 3 模块结构
 
 ```text
 src/data_pipeline/
-├── models.py
-├── utils.py
-├── extractor.py
+├── models.py            # DocumentRecord (Phase 1)
+├── utils.py             # 共享：路径、SHA、规范化、原子 IO
+├── extractor.py         # Phase 1 编排
 ├── registry.py
 ├── extractors/
-├── cleaning/                    # Phase 2 模块
-└── chunking/                    # Phase 3 新增
+├── cleaning/            # Phase 2
+│   ├── normalizer.py
+│   ├── structure.py
+│   ├── quality.py
+│   ├── dedup.py
+│   └── pipeline.py      # 复用 utils 的原子 IO
+└── chunking/            # Phase 3
     ├── __init__.py
-    ├── models.py                # ChunkingConfig / SemanticUnit / Chunk / ID 生成
-    ├── ordering.py              # 源序恢复 (restore_source_order)
-    ├── faq.py                   # 问题候选识别 + 答案配对
-    ├── semantic_units.py        # SemanticUnit 构建
-    ├── splitter.py              # 超长文本安全切分
-    ├── pipeline.py              # orchestrator (run_chunking_pipeline)
-    └── report.py                # 报告生成
+    ├── models.py        # ChunkingConfig / SemanticUnit / Chunk / ID 生成
+    ├── ordering.py      # 源序恢复
+    ├── faq.py           # 唯一 detector + 唯一 pairer
+    ├── semantic_units.py# SemanticUnit 构建
+    ├── splitter.py      # 超长文本安全切分
+    ├── audit.py         # 旁路：序列化未配对候选
+    ├── report.py        # 报告
+    └── pipeline.py      # orchestrator
 ```
 
 ### 后续阶段（暂不实现）

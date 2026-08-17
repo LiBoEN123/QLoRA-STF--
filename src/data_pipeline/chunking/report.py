@@ -1,10 +1,10 @@
-"""Phase 3 + Phase 3.5 质量报告生成。"""
+"""Phase 3 质量报告生成。"""
 
 from __future__ import annotations
 
 import statistics
 from collections import Counter
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence
 
 from .models import Chunk, SemanticUnit
 
@@ -39,13 +39,18 @@ def build_report(
     hard_split_chunk_count: int,
     overlap_chunk_count: int,
     overlap_chars_total: int,
-    faq_recovery_summary: Optional[Dict[str, int]] = None,
+    audit_summary: Optional[Dict[str, int]] = None,
 ) -> Dict[str, Any]:
-    """汇总 Phase 3 + Phase 3.5 运行结果为可序列化 dict。"""
+    """汇总 Phase 3 运行结果为可序列化 dict。
+
+    ``audit_summary`` 直接由 :mod:`audit` 提供的 status 计数注入，
+    不会再模拟"恢复期"统计。
+    """
 
     unit_type_counter: Counter = Counter()
     chunk_type_counter: Counter = Counter()
     faq_conf_counter: Counter = Counter()
+    by_number_style: Counter = Counter()
     faq_units: List[SemanticUnit] = []
     q_lens: List[int] = []
     a_lens: List[int] = []
@@ -54,7 +59,6 @@ def build_report(
     chunk_lengths: List[int] = []
     all_source_doc_ids: set = set()
     unique_source_paths: set = set()
-    recovered_counter: Counter = Counter()
 
     for u in units:
         unit_type_counter[u.unit_type] += 1
@@ -64,6 +68,7 @@ def build_report(
         if u.unit_type == "faq":
             faq_units.append(u)
             faq_conf_counter[u.faq_confidence or "none"] += 1
+            by_number_style[u.metadata.get("number_style") or "none"] += 1
             if u.question_text:
                 q_lens.append(len(u.question_text))
                 if u.question_text.rstrip().endswith(("?", "？")):
@@ -72,8 +77,6 @@ def build_report(
                 a_lens.append(len(u.answer_text))
             if u.metadata.get("answer_record_count") is not None:
                 answer_record_counts.append(int(u.metadata["answer_record_count"]))
-            detection_source = u.metadata.get("faq_detection_source") or "structured"
-            recovered_counter[detection_source] += 1
 
     for c in chunks:
         chunk_type_counter[c.chunk_type] += 1
@@ -81,16 +84,12 @@ def build_report(
         for did in c.source_doc_ids:
             all_source_doc_ids.add(did)
 
-    paired_count = sum(
-        1 for u in faq_units if (u.answer_text or "").strip()
-    )
+    paired_count = sum(1 for u in faq_units if (u.answer_text or "").strip())
 
-    recovery_section = {
-        "candidates_checked": int((faq_recovery_summary or {}).get("candidates_checked", 0)),
-        "recovered": int((faq_recovery_summary or {}).get("recovered", 0)),
-        "no_answer": int((faq_recovery_summary or {}).get("no_answer", 0)),
-        "uncertain": int((faq_recovery_summary or {}).get("uncertain", 0)),
-        "not_question": int((faq_recovery_summary or {}).get("not_question", 0)),
+    audit_section: Dict[str, int] = {
+        "candidates_checked": int((audit_summary or {}).get("candidates_checked", 0)),
+        "no_answer": int((audit_summary or {}).get("no_answer", 0)),
+        "low_confidence": int((audit_summary or {}).get("low_confidence", 0)),
     }
 
     return {
@@ -102,12 +101,11 @@ def build_report(
         "faq": {
             "high_confidence": faq_conf_counter.get("high", 0),
             "medium_confidence": faq_conf_counter.get("medium", 0),
-            "low_confidence_candidates": unpaired_candidate_count,
             "paired": paired_count,
             "unpaired_questions": unpaired_candidate_count,
-            "by_detection_source": dict(recovered_counter),
+            "by_number_style": dict(by_number_style),
         },
-        "faq_recovery": recovery_section,
+        "audit": audit_section,
         "faq_lengths": {
             "question": _length_stats(q_lens),
             "answer": _length_stats(a_lens),

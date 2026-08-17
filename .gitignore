@@ -5,9 +5,20 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 
+# Virtual environments
+.venv/
+venv/
+env/
+.python-version
+
 # Original raw data (read-only inputs)
 data/raw/**
 
 # Generated artifacts
 data/extracted/**
+data/processed/**
+data/chunks/**
 logs/**
+
+# Temporary development scripts
+tmp_kilo/

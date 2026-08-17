@@ -16,9 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 import statistics
-import tempfile
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -26,6 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
 from ..models import DocumentRecord
+from ..utils import atomic_write_json, atomic_write_jsonl, load_jsonl_records
 from . import dedup, normalizer, quality, structure
 from .quality import (
     HF_MAX_LENGTH,
@@ -63,46 +62,14 @@ class CleaningConfig:
 
 
 # ---------------------------------------------------------------------------
-# IO 辅助（原子写入）
+# IO 辅助：直接复用 :mod:`data_pipeline.utils` 中的原子写入 / JSONL 读取。
+# 这些本地名称仅为兼容历史调用点。
 # ---------------------------------------------------------------------------
 
 
-def _atomic_write_jsonl(path: Path, lines: Sequence[str]) -> None:
-    """以原子方式写入 JSONL（临时文件 + os.replace）。"""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(
-        prefix=path.name + ".",
-        suffix=".tmp",
-        dir=str(path.parent),
-    )
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
-            for line in lines:
-                fh.write(line)
-                fh.write("\n")
-        os.replace(tmp, path)
-    except Exception:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
-        raise
-
-
-def _atomic_write_json(path: Path, payload: Dict[str, Any]) -> None:
-    """以原子方式写入 JSON，key 排序稳定。"""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(
-        prefix=path.name + ".",
-        suffix=".tmp",
-        dir=str(path.parent),
-    )
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(payload, fh, ensure_ascii=False, indent=2, sort_keys=True)
-        os.replace(tmp, path)
-    except Exception:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
-        raise
+_atomic_write_jsonl = atomic_write_jsonl
+_atomic_write_json = atomic_write_json
+_load_records = load_jsonl_records
 
 
 # ---------------------------------------------------------------------------

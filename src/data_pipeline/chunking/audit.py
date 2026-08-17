@@ -1,116 +1,96 @@
-"""Phase 3.5 候选审计输出生成。"""
+"""FAQ 候选审计：仅观测主流程，不参与业务控制流。
+
+audit 唯一数据源是 :func:`pair_questions_with_answers` 直接返回的
+:class:`FaqCandidateRow` 列表——即那些被识别为问题但因为置信度不足或
+没有后续答案而未配对的 record。本模块不重新扫描 FAQ 配对逻辑。
+"""
 
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from collections import Counter
+from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Optional
 
-from .faq import ParagraphRecoveryResult
+from .faq import FaqCandidateRow
 
 
 @dataclass(frozen=True)
 class AuditEntry:
-    """单条审计记录的稳定序列化形式。"""
+    """单条审计记录：服务于人工核对的最小字段集。"""
 
-    # 该 record 的 doc_id
     doc_id: str
-    # 源文件路径
     source_path: str
-    # record_index
     record_index: int
-
-    # 候选 record 的 clean_text（审计锚点）
     text: str
-    # structure_type（paragraph / list_item / heading 等）
     structure_type: str
 
-    # 候选识别置信度（low / medium / high）
-    candidate_confidence: str
-    # 审计分类（recovered / no_answer / uncertain / not_question）
-    classification: str
-    # 判定原因（中文短语）
+    confidence: str
     reason: str
+    status: str  # paired | no_answer | low_confidence | unknown
+    number_style: str
 
-    # 前一条 record_index
-    previous_record_index: Optional[int] = None
-    # 前一条 record 文本（截断 120 字）
-    previous_text: Optional[str] = None
-
-    # 后一条 record_index
     next_record_index: Optional[int] = None
-    # 后一条 record 文本（截断 120 字）
-    next_text: Optional[str] = None
-    # 后一条 record 的 structure_type
+    next_text_preview: Optional[str] = None
     next_record_structure_type: Optional[str] = None
-
-    # 候选可能对应的答案 record_index 列表（用于人工核对）
-    possible_answer_record_indices: List[int] = field(default_factory=list)
-    # 候选答案文本预览（截断 200 字）
-    possible_answer_text_preview: str = ""
-
-    # 原始 question 文本（包含题号）
-    raw_question_text: str = ""
-    # 剥离题号后的 question 文本
-    question_text: str = ""
-    # 是否曾剥离粘连题号
-    was_sticky_number_stripped: bool = False
-
-    # 若该候选被吸收进 phase3 答案范围，对应 phase3 问题 doc_id
-    absorbed_by_pair_doc_id: Optional[str] = None
-    # 若该候选被恢复为 FAQ unit，对应 unit_id
-    recovered_unit_id: Optional[str] = None
 
 
 def build_audit_entries(
-    records: List[Dict[str, Any]],
-    recovery_results: List[ParagraphRecoveryResult],
+    ordered_records: List[Dict[str, Any]],
+    unpaired_candidates: List[FaqCandidateRow],
+    *,
+    paired_answer_doc_ids: Optional[set[str]] = None,
 ) -> List[AuditEntry]:
-    """把恢复判定结果转换为可审计的稳定条目。"""
-    doc_id_to_source: Dict[str, Dict[str, Any]] = {}
-    for rec in records:
-        did = str(rec.get("doc_id") or "")
-        doc_id_to_source[did] = rec
+    """把未配对的候选行序列化为稳定可审计条目。
+
+    判定规则：
+
+    * 置信度 ``>= medium`` → ``status = no_answer``（已识别为问题但找不到答案）。
+    * 置信度 ``low`` / ``none`` → ``status = low_confidence``（仅观察，不配对）。
+    """
+    # 用 record_index 反查到 records 中的下标，便于取下一条
+    ri_to_index: Dict[int, int] = {
+        int(r.get("record_index") or -1): i
+        for i, r in enumerate(ordered_records)
+    }
 
     entries: List[AuditEntry] = []
-    for r in recovery_results:
-        rec = None
-        for cand_rec in records:
-            if int(cand_rec.get("record_index") or -1) == r.record_index:
-                rec = cand_rec
-                break
-        if rec is None:
-            rec = records[0] if records else {}
-        source = doc_id_to_source.get(str(rec.get("doc_id") or ""), rec)
+    for row in unpaired_candidates:
+        idx = ri_to_index.get(row.record_index)
+        rec: Dict[str, Any] = ordered_records[idx] if idx is not None else {}
+        text = str(rec.get("clean_text") or rec.get("text") or "").strip()
+        next_rec = ordered_records[idx + 1] if idx is not None and idx + 1 < len(ordered_records) else None
+        next_text = ""
+        next_st: Optional[str] = None
+        next_ri: Optional[int] = None
+        if next_rec is not None:
+            next_text = str(next_rec.get("clean_text") or next_rec.get("text") or "").strip()[:120]
+            next_st = str(next_rec.get("structure_type") or "") or None
+            next_ri = int(next_rec.get("record_index") or -1)
+
+        if row.candidate.confidence in ("medium", "high"):
+            status = "no_answer"
+        else:
+            status = "low_confidence"
+
         entries.append(
             AuditEntry(
                 doc_id=str(rec.get("doc_id") or ""),
-                source_path=str(rec.get("source_path") or source.get("source_path") or ""),
-                record_index=r.record_index,
-                text=str(rec.get("clean_text") or rec.get("text") or "").strip(),
+                source_path=str(rec.get("source_path") or ""),
+                record_index=row.record_index,
+                text=text,
                 structure_type=str(rec.get("structure_type") or "paragraph"),
-                candidate_confidence=r.candidate.confidence,
-                classification=r.classification,
-                reason=r.reason,
-                previous_record_index=r.previous_record_index,
-                previous_text=r.previous_record_text,
-                next_record_index=r.next_record_index,
-                next_text=r.next_record_text,
-                next_record_structure_type=r.next_record_structure_type,
-                possible_answer_record_indices=list(r.answer_record_indices),
-                possible_answer_text_preview=r.answer_text[:200] if r.answer_text else "",
-                raw_question_text=r.raw_question_text,
-                question_text=r.question_text,
-                was_sticky_number_stripped=r.was_stripped,
-                absorbed_by_pair_doc_id=r.absorbed_by_pair_doc_id,
-                recovered_unit_id=r.recovered_unit_id,
+                confidence=row.candidate.confidence,
+                reason=row.candidate.reason,
+                status=status,
+                number_style=row.candidate.number_style,
+                next_record_index=next_ri,
+                next_text_preview=next_text or None,
+                next_record_structure_type=next_st,
             )
         )
 
-    # 稳定排序：source_path, record_index, doc_id
-    entries.sort(
-        key=lambda e: (e.source_path, e.record_index, e.doc_id)
-    )
+    entries.sort(key=lambda e: (e.source_path, e.record_index, e.doc_id))
     return entries
 
 
@@ -125,8 +105,5 @@ def serialize_audit(entry: AuditEntry) -> str:
 
 
 def summarize(entries: List[AuditEntry]) -> Dict[str, int]:
-    """按 classification 统计审计条目数量。"""
-    out: Dict[str, int] = {}
-    for e in entries:
-        out[e.classification] = out.get(e.classification, 0) + 1
-    return out
+    """按 status 统计审计条目数量。"""
+    return dict(Counter(e.status for e in entries))
