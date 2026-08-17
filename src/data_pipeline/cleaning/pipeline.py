@@ -43,6 +43,17 @@ from .quality import (
 
 @dataclass
 class CleaningConfig:
+    """Phase 2 清洗管线的全部可调阈值。
+
+    Attributes:
+        min_length: 文本长度下限，低于此值将被拒。
+        max_length: 文本长度上限，超过此值将被拒。
+        max_symbol_ratio: 符号字符占比上限，超过将标记为疑似乱码。
+        simhash_distance: SimHash 近似重复的 Hamming 距离阈值。
+        enable_near_dedup: 是否启用 SimHash 近似去重。
+        quality: 详细质量配置（嵌套 :class:`QualityConfig`）。
+    """
+
     min_length: int = quality.MIN_TEXT_LENGTH
     max_length: int = quality.MAX_TEXT_LENGTH
     max_symbol_ratio: float = quality.MAX_SYMBOL_RATIO
@@ -101,6 +112,34 @@ def _atomic_write_json(path: Path, payload: Dict[str, Any]) -> None:
 
 @dataclass
 class CleaningResult:
+    """Phase 2 一次完整运行的汇总结果。
+
+    Attributes:
+        input_path: 输入 JSONL 路径。
+        output_clean: 清洗后输出 JSONL 路径。
+        output_rejected: 被拒记录输出 JSONL 路径。
+        output_duplicates: 重复记录输出 JSONL 路径。
+        output_report: 报告 JSON 路径。
+        input_records: 输入记录数。
+        output_records: 最终保留记录数。
+        rejected_records: 被质量规则拒掉的记录数。
+        exact_duplicates: 完全重复记录数。
+        near_duplicates: 近似重复记录数。
+        cleaning_actions_counts: 各清洗动作的出现次数。
+        structure_counts: 结构类型计数。
+        reject_reason_counts: 拒因计数。
+        quality_flag_counts: 质量 flag 计数。
+        header_footer_files: 被识别到页眉/页脚的源文档数。
+        header_footer_texts_removed: 被剥除的页眉/页脚文本数。
+        line_break_repaired: 触发换行修复的记录数。
+        text_changed_count: ``clean_text`` 与原始 ``text`` 不同的记录数。
+        text_length_stats: 文本长度分布统计。
+        quality_stats: 质量指标汇总。
+        structure_stats: 结构计数（与 ``structure_counts`` 同义）。
+        source_type_counts: 源类型计数。
+        top_sources: 出现记录数最多的源文件 Top N。
+    """
+
     input_path: Path
     output_clean: Path
     output_rejected: Path

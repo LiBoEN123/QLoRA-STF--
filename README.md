@@ -7,10 +7,11 @@
 
 1. **Phase 1**：原始数据准备 + 文档抽取（统一 JSONL + manifest）。
 2. **Phase 2**：文本清洗、结构恢复、质量过滤、SimHash 去重。
-3. Phase 3：SFT 数据生成（QA / messages）。
-4. Phase 4：QLoRA SFT 训练。
+3. **Phase 3**：Semantic Unit 恢复 + FAQ 配对 + 结构感知 Chunking。
+4. Phase 4：SFT 数据生成（QA / messages）。
+5. Phase 5：QLoRA SFT 训练。
 
-> Phase 1 + Phase 2 已实现。Phase 2 仍然**不会**生成 SFT 训练样本，不调用任何 LLM。
+> Phase 1 + Phase 2 + Phase 3 已实现。Phase 3 仍然**不会**生成 SFT 训练样本，不调用任何 LLM。
 
 ---
 
@@ -224,3 +225,104 @@ src/data_pipeline/
     ├── dedup.py         # Exact SHA256 + SimHash near-dedup
     └── pipeline.py      # orchestrator (run_cleaning_pipeline)
 ```
+
+---
+
+## Phase 3 — Semantic Unit + FAQ Pairing + Structure-aware Chunking
+
+Phase 3 在 Phase 2 输出上恢复源文档 record 顺序，识别 FAQ 问答关系并构建语义单元，然后做结构感知 chunking。**Phase 3 只恢复源数据中已有的 FAQ 关系并构建结构化 chunk，不会调用 LLM、不会生成新的 QA 内容、不会生成 SFT messages、不会进行模型训练。**
+
+### 数据流
+
+```text
+data/raw/**
+        ↓
+Phase 1 Extract
+        ↓
+data/extracted/documents.jsonl
+        ↓
+Phase 2 Clean / Normalize / Filter / Dedup
+        ↓
+data/processed/documents_clean.jsonl
+        ↓
+Phase 3 Restore source order
+        ↓
+FAQ question candidate detection
+        ↓
+FAQ answer pairing
+        ↓
+Semantic unit construction
+        ↓
+Structure-aware chunking
+        ↓
+data/chunks/semantic_units.jsonl
+data/chunks/chunks.jsonl
+data/chunks/chunk_report.json
+```
+
+### 运行
+
+```bash
+# 默认（读 data/processed → 写 data/chunks）
+python scripts/build_chunks.py
+
+# 自定义路径与阈值
+python scripts/build_chunks.py \
+  --input         data/processed/documents_clean.jsonl \
+  --units-output  data/chunks/semantic_units.jsonl \
+  --chunks-output data/chunks/chunks.jsonl \
+  --report        data/chunks/chunk_report.json \
+  --log-file      logs/build_chunks.log \
+  --min-chars     100 \
+  --target-chars  800 \
+  --max-chars     1200 \
+  --overlap-chars 100 \
+  --faq-min-confidence medium
+```
+
+### 输出
+
+| 路径 | 含义 |
+| --- | --- |
+| `data/chunks/semantic_units.jsonl` | 语义单元（FAQ / heading / paragraph_group / list_group / standalone），含 `unit_id`、`unit_type`、`question_text`、`answer_text`、`source_doc_ids`、`source_record_indices` |
+| `data/chunks/chunks.jsonl` | 最终 chunk（faq / heading / text），含 `chunk_id`、`source_unit_ids`、`source_doc_ids`、`source_record_indices` |
+| `data/chunks/chunk_report.json` | 聚合统计：FAQ 配对数、置信度分布、长度分布、split / overlap 统计、可追溯性 |
+| `logs/build_chunks.log` | 详细运行日志 |
+
+### 关键规则
+
+- **源序恢复**：Phase 2 按 `doc_id` 升序输出，但 `doc_id` 不反映源文档顺序。Phase 3 使用 `(source_path, page_number, sheet_name, record_index, doc_id)` 五元组**稳定排序**重建原文顺序。
+- **Question detection**：高置信度 = 阿拉伯数字/圈数字编号 + 问号；中置信度 = 阿拉伯数字/圈数字编号 + 强疑问词；中文编号 + 问号 = 中置信度；仅有强疑问词 = 低置信度。
+- **Precision > Recall**：自动配对只接受 high / medium 置信度；`（1）`/`（2）` 全角括号枚举不会误识别为问题；low 置信度保留为 `unpaired_questions` 不参与自动配对。
+- **FAQ 一对一**：一道 FAQ = 一个 `SemanticUnit` = 一个 `chunk`，不做切分；短 FAQ 也不与下一道合并。
+- **结构边界硬性**：chapter / section / heading / subheading 是硬边界，跨结构正文绝不合并。
+- **可追溯**：`unit_id` / `chunk_id` 由 SHA256(输入内容) 决定性生成；每个 chunk 都保留 `source_unit_ids`、`source_doc_ids`、`source_record_indices`，可一路回溯到原始 Phase 1 `DocumentRecord` 与源文件。
+- **确定性**：相同输入 + 相同配置 → SHA256 一致的输出文件，report 不含任何时间戳 / 当前时间字段。
+- **不调用 LLM / 不生成 SFT messages / 不训练模型**：Phase 3 严格止步于「数据结构恢复 + 结构化 chunking」。
+- **中文注释**：从 Phase 3 开始，所有新增/修改代码的注释、docstring、CLI 参数说明、日志内容均优先使用中文；类名 / 函数名 / 字段名 / JSON key / CLI 参数继续使用规范英文命名。
+
+### Phase 3 模块结构
+
+```text
+src/data_pipeline/
+├── models.py
+├── utils.py
+├── extractor.py
+├── registry.py
+├── extractors/
+├── cleaning/                    # Phase 2 模块
+└── chunking/                    # Phase 3 新增
+    ├── __init__.py
+    ├── models.py                # ChunkingConfig / SemanticUnit / Chunk / ID 生成
+    ├── ordering.py              # 源序恢复 (restore_source_order)
+    ├── faq.py                   # 问题候选识别 + 答案配对
+    ├── semantic_units.py        # SemanticUnit 构建
+    ├── splitter.py              # 超长文本安全切分
+    ├── pipeline.py              # orchestrator (run_chunking_pipeline)
+    └── report.py                # 报告生成
+```
+
+### 后续阶段（暂不实现）
+
+- Phase 4：SFT messages 生成（基于本阶段 `semantic_units.jsonl` 中的 FAQ 关系直接生成 messages；不调 LLM）。
+- Phase 5：Qwen3-8B + QLoRA SFT 训练。

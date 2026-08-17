@@ -191,6 +191,14 @@ def evaluate_quality(
 
 @dataclass
 class HeaderFooterMatch:
+    """被检测为页眉/页脚的短文本及其统计信息。
+
+    Attributes:
+        text: 被标记的页眉/页脚文本（已 strip）。
+        count: 在该源文档内出现次数。
+        ratio: ``count / 该源文档 record 总数``。
+    """
+
     text: str
     count: int
     ratio: float

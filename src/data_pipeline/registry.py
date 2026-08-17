@@ -22,6 +22,7 @@ EXTRACTORS: dict[str, BaseExtractor] = {}
 
 
 def _register(extractor: BaseExtractor) -> None:
+    """将 ``extractor`` 注册到 ``EXTRACTORS`` 表，按其声明的后缀建立索引。"""
     for suffix in extractor.suffixes:
         EXTRACTORS.setdefault(suffix.lower(), extractor)
 

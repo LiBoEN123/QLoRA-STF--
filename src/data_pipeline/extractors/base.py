@@ -13,14 +13,22 @@ if TYPE_CHECKING:
 
 @dataclass
 class ExtractionResult:
-    """单个文件抽取的结果。"""
+    """单个文件抽取的结果。
+
+    Attributes:
+        records: 从该文件抽取到的全部 ``DocumentRecord``。
+        warnings: 与该文件相关的告警（如疑似扫描页、空 record 跳过等）。
+    """
 
     records: list["DocumentRecord"] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
 
 class BaseExtractor(ABC):
-    """所有 extractor 的抽象基类。"""
+    """所有 extractor 的抽象基类。
+
+    子类必须设置 ``source_type`` / ``suffixes`` 并实现 :meth:`extract`。
+    """
 
     #: 存入 ``DocumentRecord.source_type`` 的类型标签。
     source_type: str = ""

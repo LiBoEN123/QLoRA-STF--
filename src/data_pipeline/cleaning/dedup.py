@@ -30,6 +30,15 @@ def exact_dedup_key(text: str) -> str:
 
 @dataclass(frozen=True)
 class ExactDuplicate:
+    """完全重复的 record 信息。
+
+    Attributes:
+        duplicate_doc_id: 被判为重复的 record 的 ``doc_id``。
+        canonical_doc_id: 同一文本下首个出现的 canonical record 的 ``doc_id``。
+        duplicate_type: 固定为 ``"exact"``。
+        similarity: 固定为 ``1.0``。
+    """
+
     duplicate_doc_id: str
     canonical_doc_id: str
     duplicate_type: str = "exact"
@@ -143,6 +152,16 @@ def hamming_distance(a: int, b: int, n_bits: int = 64) -> int:
 
 @dataclass(frozen=True)
 class NearDuplicate:
+    """近似重复的 record 信息（SimHash 距离判定）。
+
+    Attributes:
+        duplicate_doc_id: 被判为近似重复的 record 的 ``doc_id``。
+        canonical_doc_id: 与之最相似的 canonical record 的 ``doc_id``。
+        duplicate_type: 固定为 ``"near"``。
+        similarity: 相似度估计（0..1，越大越相似）。
+        distance: SimHash Hamming 距离。
+    """
+
     duplicate_doc_id: str
     canonical_doc_id: str
     duplicate_type: str = "near"

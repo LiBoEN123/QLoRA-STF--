@@ -10,6 +10,12 @@ from .base import BaseExtractor, ExtractionResult
 
 
 class PDFExtractor(BaseExtractor):
+    """基于 PyMuPDF (fitz) 的 PDF 文件抽取器。
+
+    每一页输出一个 ``DocumentRecord``；疑似扫描页（无文本层）也会输出
+    占位 record，并在 metadata 中标记 ``possible_scanned_pdf=True``。
+    """
+
     source_type: str = "pdf"
     suffixes: tuple[str, ...] = (".pdf",)
 

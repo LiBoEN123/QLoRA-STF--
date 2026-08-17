@@ -1,9 +1,7 @@
-"""Extractor implementations for Phase 1.
+"""Phase 1 的 extractor 实现。
 
-Each extractor is responsible for converting a single file of a supported
-type into a list of ``DocumentRecord`` instances. Extractors MUST NOT
-modify the source file. They are kept deliberately simple and only do
-basic structural extraction.
+每个 extractor 负责将单个受支持类型的文件转换为 ``DocumentRecord`` 列表。
+extractor 不应修改源文件，且保持简单，仅做基础的结构化抽取。
 """
 
 from .base import BaseExtractor, ExtractionResult

@@ -10,6 +10,11 @@ from .base import BaseExtractor, ExtractionResult
 
 
 class HTMLExtractor(BaseExtractor):
+    """基于 BeautifulSoup4 的 HTML (.html / .htm) 文件抽取器。
+
+    去除 ``script / style / noscript`` 噪声后，把剩余文本作为一个 record 输出。
+    """
+
     source_type: str = "html"
     suffixes: tuple[str, ...] = (".html", ".htm")
 

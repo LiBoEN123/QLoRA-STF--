@@ -43,6 +43,13 @@ def _summarize_text(bits: dict[str, str]) -> str:
 
 
 class JSONExtractor(BaseExtractor):
+    """JSON (.json) 文件抽取器。
+
+    支持顶层为 dict 或 list；每个 dict 元素抽取常见文本字段
+    （``text / content / body / question / answer / title``）并合并为
+    一条 ``DocumentRecord`` 输出。
+    """
+
     source_type: str = "json"
     suffixes: tuple[str, ...] = (".json",)
 
@@ -102,7 +109,7 @@ class JSONExtractor(BaseExtractor):
 
     @staticmethod
     def _safe_metadata(entry: dict[str, Any]) -> dict[str, Any]:
-        """Keep top-level scalars as metadata, but never overwrite text."""
+        """保留顶层标量字段作为 metadata，但排除文本字段以避免覆盖。"""
         meta: dict[str, Any] = {}
         for key, value in entry.items():
             if key in _TEXT_FIELDS:
@@ -122,6 +129,12 @@ class JSONExtractor(BaseExtractor):
 
 
 class JSONLExtractor(BaseExtractor):
+    """JSONL (.jsonl) 文件抽取器。
+
+    逐行解析 JSON 对象，每条非空有效对象产出 ``DocumentRecord``；非法行会
+    被记录到 ``warnings`` 而非中断流水线。
+    """
+
     source_type: str = "jsonl"
     suffixes: tuple[str, ...] = (".jsonl",)
 

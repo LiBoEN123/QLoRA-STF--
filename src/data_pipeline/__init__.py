@@ -1,6 +1,6 @@
-"""Data pipeline package for Qwen3-8B QLoRA SFT project.
+"""Qwen3-8B QLoRA SFT 项目的数据流水线包。
 
-Phase 1: Document extraction from raw files into a unified JSONL format.
+Phase 1：从原始文件中抽取文档并转换为统一的 JSONL 格式。
 """
 
 from .models import DocumentRecord

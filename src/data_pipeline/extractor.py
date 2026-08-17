@@ -21,6 +21,19 @@ from .utils import (
 
 @dataclass
 class FileOutcome:
+    """单个文件的抽取结果。
+
+    Attributes:
+        source_path: 相对路径（POSIX 风格）。
+        source_type: extractor 报告的类型标签。
+        status: 处理状态，``success`` / ``failed`` / ``skipped`` 之一。
+        records: 实际写入的 record 数。
+        sha256: 文件内容 SHA256。
+        warnings: 与该文件相关的告警列表。
+        error_type: 失败时的异常类名。
+        error: 失败时的异常字符串。
+    """
+
     source_path: str
     source_type: str
     status: str  # "success" | "failed" | "skipped"
@@ -33,6 +46,16 @@ class FileOutcome:
 
 @dataclass
 class PipelineResult:
+    """整个目录树抽取的汇总结果。
+
+    Attributes:
+        input_root: 输入根目录绝对路径。
+        output_jsonl: 写入的 JSONL 文件路径。
+        manifest_path: 写入的 manifest 文件路径。
+        outcomes: 每个文件的 :class:`FileOutcome`。
+        log_path: 日志文件路径（可选）。
+    """
+
     input_root: Path
     output_jsonl: Path
     manifest_path: Path
@@ -128,7 +151,7 @@ def run_pipeline(
     *,
     logger: logging.Logger | None = None,
 ) -> PipelineResult:
-    """Run extraction over ``input_root`` and write outputs to disk."""
+    """在 ``input_root`` 目录树上运行抽取并将 JSONL / manifest 写入磁盘。"""
     log = logger or logging.getLogger("data_pipeline")
     input_root = input_root.resolve()
     output_jsonl = output_jsonl.resolve()

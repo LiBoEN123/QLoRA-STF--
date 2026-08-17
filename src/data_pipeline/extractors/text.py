@@ -10,6 +10,11 @@ from .base import BaseExtractor, ExtractionResult
 
 
 class TextExtractor(BaseExtractor):
+    """纯文本 (.txt / .log) 文件抽取器。
+
+    整个文件作为单个 ``DocumentRecord`` 输出。
+    """
+
     source_type: str = "text"
     suffixes: tuple[str, ...] = (".txt", ".log")
 

@@ -46,7 +46,15 @@ STRUCTURE_LEVELS: dict[str, int] = {
 
 @dataclass(frozen=True)
 class StructureInfo:
-    """单条 record 文本的结构分类结果。"""
+    """单条 record 文本的结构分类结果。
+
+    Attributes:
+        structure_type: 结构类型标签，如 ``chapter`` / ``section`` / ``heading`` /
+            ``subheading`` / ``list_item`` / ``paragraph`` / ``table`` / ``unknown``。
+        structure_level: 数字层级（数字越小层级越高），用于跨类型比较。
+        detected_section: 若当前 record 本身是章节/小节标记，填充对应的标题文本。
+        detected_heading: 若当前 record 本身是标题/子标题标记，填充对应的标题文本。
+    """
 
     structure_type: str
     structure_level: int

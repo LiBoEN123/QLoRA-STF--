@@ -21,6 +21,7 @@ _HEADING_PREFIXES = (
 
 
 def _is_heading_style(style_name: str) -> bool:
+    """判断 ``style_name`` 是否属于 Heading/Title 系列样式。"""
     return any(style_name.startswith(prefix) for prefix in _HEADING_PREFIXES)
 
 
@@ -46,6 +47,12 @@ def _format_table_as_text(rows: list[list[str]]) -> str:
 
 
 class WordExtractor(BaseExtractor):
+    """基于 python-docx 的 Word (.docx) 文件抽取器。
+
+    按 body 中段落 / 表格出现的顺序输出 record，标题（Heading/Title 样式）
+    会作为单独 record 并填充 ``section``。
+    """
+
     source_type: str = "docx"
     suffixes: tuple[str, ...] = (".docx",)
 

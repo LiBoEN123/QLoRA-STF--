@@ -1,0 +1,65 @@
+{
+  "chunks": 1391,
+  "chunks_by_type": {
+    "faq": 1318,
+    "heading": 57,
+    "text": 16
+  },
+  "faq": {
+    "high_confidence": 1318,
+    "low_confidence_candidates": 16,
+    "medium_confidence": 0,
+    "paired": 1318,
+    "unpaired_questions": 16
+  },
+  "faq_lengths": {
+    "answer": {
+      "max": 2664,
+      "mean": 263.25,
+      "median": 181.5,
+      "min": 10,
+      "p95": 708.0
+    },
+    "answer_record_counts": {
+      "max": 35,
+      "mean": 3.07,
+      "median": 1.0,
+      "min": 1,
+      "p95": 9.0
+    },
+    "question": {
+      "max": 159,
+      "mean": 22.28,
+      "median": 19.0,
+      "min": 5,
+      "p95": 44.0
+    },
+    "question_ends_with_mark_ratio": 1.0
+  },
+  "input_records": 5433,
+  "length": {
+    "max": 2685,
+    "mean": 280.14,
+    "median": 202.0,
+    "min": 5,
+    "p95": 723.0
+  },
+  "semantic_units": 1391,
+  "splitting": {
+    "hard_splits": 0,
+    "overlap_chars_total": 0,
+    "overlap_chunks": 0,
+    "split_units": 0
+  },
+  "traceability": {
+    "unique_source_doc_ids": 5433,
+    "unique_source_paths": 1
+  },
+  "unit_types": {
+    "faq": 1318,
+    "heading": 17,
+    "list_group": 15,
+    "paragraph_group": 1,
+    "subheading": 40
+  }
+}

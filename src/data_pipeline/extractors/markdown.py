@@ -14,6 +14,12 @@ _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 
 
 class MarkdownExtractor(BaseExtractor):
+    """Markdown (.md / .markdown) 文件抽取器。
+
+    整个文件作为单个 ``DocumentRecord`` 输出，``metadata.first_heading``
+    记录首个 ``#`` 标题。
+    """
+
     source_type: str = "markdown"
     suffixes: tuple[str, ...] = (".md", ".markdown")
 

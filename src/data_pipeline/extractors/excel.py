@@ -43,6 +43,11 @@ def _format_sheet_as_table(rows: list[list[str]]) -> str:
 
 
 class ExcelExtractor(BaseExtractor):
+    """基于 openpyxl 的 Excel (.xlsx / .xlsm) 文件抽取器。
+
+    每个 sheet 渲染成 Markdown 表格字符串并作为一条 ``DocumentRecord`` 输出。
+    """
+
     source_type: str = "excel"
     suffixes: tuple[str, ...] = (".xlsx", ".xlsm")
 
@@ -96,6 +101,12 @@ class ExcelExtractor(BaseExtractor):
 
 
 class CSVExtractor(BaseExtractor):
+    """CSV (.csv) 文件抽取器。
+
+    自动嗅探分隔符，将整个 CSV 渲染为 Markdown 表格字符串并作为一条
+    ``DocumentRecord`` 输出。
+    """
+
     source_type: str = "csv"
     suffixes: tuple[str, ...] = (".csv",)
 
