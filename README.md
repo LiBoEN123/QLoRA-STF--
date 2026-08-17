@@ -1,19 +1,18 @@
 # QLoRA SFT 党建知识微调项目
 
 > 7B/8B 量级（Qwen3-8B）+ QLoRA + SFT 领域大模型微调数据流水线。
-> 当前阶段：**Phase 3 — Semantic Unit 恢复 + FAQ 配对 + 结构感知 Chunking**。
+> 当前阶段：**Phase 4 — SFT Dataset Construction**。
 
-本仓库会按阶段实现：
+本仓库按阶段实现：
 
-1. **Phase 1**：原始数据准备 + 文档抽取（统一 JSONL + manifest）。
-2. **Phase 2**：文本清洗、结构恢复、质量过滤、SimHash 去重。
-3. **Phase 3**：Semantic Unit 恢复 + FAQ 配对 + 结构感知 Chunking。
-4. Phase 4：SFT 数据生成（QA / messages）。
-5. Phase 5：QLoRA SFT 训练。
+1. **Phase 1 — Extraction**：原始数据准备 + 文档抽取（统一 JSONL + manifest）。
+2. **Phase 2 — Cleaning**：文本清洗、结构恢复、质量过滤、SimHash 去重。
+3. **Phase 3 — Semantic Unit + FAQ + Chunking**：Semantic Unit 恢复 + FAQ 配对 + 结构感知 Chunking。
+4. **Phase 4 — SFT Dataset Construction**：把 FAQ SemanticUnit 转成标准 chat-style SFT messages，做数据质量审计与 Train/Val/Test 确定性划分。
+5. **Phase 5 — Tokenizer Validation + QLoRA Training Preparation / Training**（后续）。
 
-> Phase 1 + Phase 2 + Phase 3 已实现。Phase 3 仍然**不会**生成 SFT 训练样本，不调用任何 LLM。
-> Phase 3 在历史迭代中曾为了恢复少量边界 FAQ 临时引入"Phase 3.5"的额外恢复流程，
-> 当前已合并回收——仅保留唯一的"一次检测 + 一次配对"主链。
+> Phase 1 + Phase 2 + Phase 3 + Phase 4 已实现。Phase 4 仍然**不会**调用任何 LLM、不会加载 tokenizer、不会训练模型——只把 Phase 3 已经确认的可靠 FAQ 稳定、无损、可追溯地转换成标准 Chat-style SFT 数据集。
+> Phase 3 在历史迭代中曾为了恢复少量边界 FAQ 临时引入"Phase 3.5"的额外恢复流程，当前已合并回收——仅保留唯一的"一次检测 + 一次配对"主链。
 
 ---
 
@@ -131,8 +130,7 @@ src/data_pipeline/
 
 ## 后续阶段（暂不实现）
 
-- Phase 3：生成 SFT messages、Train/Val/Test 划分。
-- Phase 4：Qwen3-8B + QLoRA SFT 训练。
+- Phase 5：Tokenizer Validation + QLoRA Training Preparation / Training。
 
 ---
 
@@ -362,7 +360,137 @@ src/data_pipeline/
     └── pipeline.py      # orchestrator
 ```
 
+---
+
+## Phase 4 — SFT Dataset Construction
+
+Phase 4 直接消费 Phase 3 产出的 `semantic_units.jsonl`，只取 `unit_type == "faq"` 的单元，**不重新 detect / pair FAQ**，**不调用任何 LLM**，**不加载 tokenizer**，**不训练模型**——只把已配对的 FAQ 转成标准 Chat-style SFT 数据并做数据质量审计与 Train/Val/Test 确定性划分。
+
+### 数据流
+
+```text
+data/raw/**
+        ↓
+Phase 1 Extract
+        ↓
+data/extracted/documents.jsonl
+        ↓
+Phase 2 Clean / Normalize / Filter / Dedup
+        ↓
+data/processed/documents_clean.jsonl
+        ↓
+Phase 3 Semantic Unit + FAQ + Chunking
+        ↓
+data/chunks/semantic_units.jsonl
+        ↓
+Phase 4 SFT Dataset Construction
+        ├── 只取 unit_type == "faq"
+        ├── 字段校验（unit_id / question / answer / confidence / traceability）
+        ├── sample_id = SHA256(unit_id + q + a)[:24]
+        ├── exact dedup（normalized q+a）
+        ├── question conflict（同问不同答 ⇒ 整组剔除）
+        ├── 确定性 split（split_group_key = SHA256(normalized_q), salt 固定）
+        ├── cross-split leakage 硬校验
+        ↓
+data/sft/all.jsonl
+data/sft/train.jsonl
+data/sft/validation.jsonl
+data/sft/test.jsonl
+data/sft/rejected.jsonl
+data/sft/dataset_report.json
+```
+
+### 运行
+
+```bash
+# 默认（读 data/chunks/semantic_units.jsonl → 写 data/sft/）
+python scripts/build_sft_dataset.py
+
+# 自定义路径与参数
+python scripts/build_sft_dataset.py \
+  --input             data/chunks/semantic_units.jsonl \
+  --all-output        data/sft/all.jsonl \
+  --train-output      data/sft/train.jsonl \
+  --validation-output data/sft/validation.jsonl \
+  --test-output       data/sft/test.jsonl \
+  --rejected-output   data/sft/rejected.jsonl \
+  --report            data/sft/dataset_report.json \
+  --log-file          logs/build_sft_dataset.log \
+  --min-confidence    medium \
+  --train-ratio       0.90 \
+  --validation-ratio  0.05 \
+  --test-ratio        0.05 \
+  --split-salt        qlora-sft-phase4-v1
+```
+
+### 输出
+
+| 路径 | 含义 |
+| --- | --- |
+| `data/sft/all.jsonl` | 通过质量校验的 accepted samples 全量（user + assistant） |
+| `data/sft/train.jsonl` | 训练集 |
+| `data/sft/validation.jsonl` | 验证集 |
+| `data/sft/test.jsonl` | 测试集 |
+| `data/sft/rejected.jsonl` | 被剔除的样本（含 `reject_reasons` / `canonical_sample_id`） |
+| `data/sft/dataset_report.json` | 数据质量报告（含 split 比例、长度分布、leakage、traceability 等） |
+| `logs/build_sft_dataset.log` | 详细运行日志 |
+
+### SFT Sample Schema
+
+```json
+{
+  "sample_id": "sft_xxxxxxxxxxxxxxxxxxxxxxxx",
+  "messages": [
+    {"role": "user", "content": "党员应当履行哪些义务？"},
+    {"role": "assistant", "content": "党员应当……"}
+  ],
+  "metadata": {
+    "unit_id": "unit_...",
+    "source_path": "...",
+    "file_name": "...",
+    "file_sha256": "...",
+    "source_doc_ids": ["doc_..."],
+    "source_record_indices": [2, 3],
+    "faq_confidence": "high",
+    "structure_path": ["一、基层党组织的设置"],
+    "detected_section": "一、基层党组织的设置",
+    "question_record_index": 2,
+    "answer_record_count": 1,
+    "number_style": "arabic_dot"
+  }
+}
+```
+
+### 关键规则
+
+- **只消费 `unit_type == "faq"`**：heading / subheading / paragraph_group / list_group / standalone 一律不进入 SFT。
+- **内容零修改**：`user.content == question_text.strip()`，`assistant.content == answer_text.strip()`；不增加"问题："/"答案："前缀；不增加 system / tool / developer 消息。
+- **sample_id 稳定**：`SHA256(unit_id + question + answer)` 截前 24 位；同一输入重复运行必须一致；禁止 UUID / random / timestamp。
+- **Exact dedup**：`normalized(q) + normalized(a)` 相同的样本只保留 1 条 canonical（按 sample_id 升序选首条）。
+- **Question conflict**：同问不同答 ⇒ 该组所有样本**整组剔除**，不进入训练集，不静默通过。
+- **确定性 split**：按 `split_group_key = SHA256(normalized_question)` 避免同问跨 split；`split_salt` 默认 `qlora-sft-phase4-v1`，必须显式持久化在 report 中。
+- **Leakage 硬校验**：`cross_split_question = 0` 且 `cross_split_exact_sample = 0`；否则 pipeline 失败，不只 warning。
+- **不调用 LLM / 不加载 tokenizer / 不训练模型**：Phase 4 严格止步于「FAQ → messages → 质量审计 → 划分」。
+- **公共 IO**：所有原子写文件逻辑（`atomic_write_json` / `atomic_write_jsonl` / `load_jsonl_records`）只维护于 `src/data_pipeline/utils.py`，Phase 1 / 2 / 3 / 4 全部复用。
+- **中文注释**：所有新增/修改代码的注释、docstring、CLI 参数说明、日志内容均优先使用中文；类名 / 函数名 / 字段名 / JSON key / CLI 参数继续使用规范英文命名。
+- **类字段中文注释强制**：所有新增 dataclass 的每一个字段前必须存在中文说明注释。
+
+### Phase 4 模块结构
+
+```text
+src/data_pipeline/
+└── sft/
+    ├── __init__.py
+    ├── models.py        # SFTBuildConfig / SFTSample
+    └── pipeline.py      # run_sft_pipeline（唯一入口）
+
+scripts/
+└── build_sft_dataset.py  # CLI
+
+tests/
+└── test_sft_dataset.py   # 单元测试（FAQ→messages、字段校验、dedup、conflict、split、leakage、accounting、原子写、确定性、类字段中文注释约定）
+```
+
 ### 后续阶段（暂不实现）
 
-- Phase 4：SFT messages 生成（基于本阶段 `semantic_units.jsonl` 中的 FAQ 关系直接生成 messages；不调 LLM）。
-- Phase 5：Qwen3-8B + QLoRA SFT 训练。
+- Phase 5：Tokenizer Validation + QLoRA Training Preparation / Training。

@@ -18,6 +18,7 @@ data/raw/**
 data/extracted/**
 data/processed/**
 data/chunks/**
+data/sft/**
 logs/**
 
 # Temporary development scripts
