@@ -1,4 +1,4 @@
-"""Phase 3 质量报告生成。"""
+"""Phase 3 + Phase 3.5 质量报告生成。"""
 
 from __future__ import annotations
 
@@ -39,8 +39,9 @@ def build_report(
     hard_split_chunk_count: int,
     overlap_chunk_count: int,
     overlap_chars_total: int,
+    faq_recovery_summary: Optional[Dict[str, int]] = None,
 ) -> Dict[str, Any]:
-    """汇总 Phase 3 运行结果为可序列化 dict。"""
+    """汇总 Phase 3 + Phase 3.5 运行结果为可序列化 dict。"""
 
     unit_type_counter: Counter = Counter()
     chunk_type_counter: Counter = Counter()
@@ -53,6 +54,7 @@ def build_report(
     chunk_lengths: List[int] = []
     all_source_doc_ids: set = set()
     unique_source_paths: set = set()
+    recovered_counter: Counter = Counter()
 
     for u in units:
         unit_type_counter[u.unit_type] += 1
@@ -70,6 +72,8 @@ def build_report(
                 a_lens.append(len(u.answer_text))
             if u.metadata.get("answer_record_count") is not None:
                 answer_record_counts.append(int(u.metadata["answer_record_count"]))
+            detection_source = u.metadata.get("faq_detection_source") or "structured"
+            recovered_counter[detection_source] += 1
 
     for c in chunks:
         chunk_type_counter[c.chunk_type] += 1
@@ -80,6 +84,14 @@ def build_report(
     paired_count = sum(
         1 for u in faq_units if (u.answer_text or "").strip()
     )
+
+    recovery_section = {
+        "candidates_checked": int((faq_recovery_summary or {}).get("candidates_checked", 0)),
+        "recovered": int((faq_recovery_summary or {}).get("recovered", 0)),
+        "no_answer": int((faq_recovery_summary or {}).get("no_answer", 0)),
+        "uncertain": int((faq_recovery_summary or {}).get("uncertain", 0)),
+        "not_question": int((faq_recovery_summary or {}).get("not_question", 0)),
+    }
 
     return {
         "input_records": int(input_records),
@@ -93,7 +105,9 @@ def build_report(
             "low_confidence_candidates": unpaired_candidate_count,
             "paired": paired_count,
             "unpaired_questions": unpaired_candidate_count,
+            "by_detection_source": dict(recovered_counter),
         },
+        "faq_recovery": recovery_section,
         "faq_lengths": {
             "question": _length_stats(q_lens),
             "answer": _length_stats(a_lens),

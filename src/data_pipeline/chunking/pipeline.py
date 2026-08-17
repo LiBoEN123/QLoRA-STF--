@@ -1,4 +1,4 @@
-"""Phase 3 编排器：从 clean records 到 semantic units + chunks。"""
+"""Phase 3 + Phase 3.5 编排器：从 clean records 到 semantic units + chunks。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,18 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 from ..utils import get_logger
-from .faq import pair_questions_with_answers
+from .audit import (
+    AuditEntry,
+    build_audit_entries,
+    serialize_audit,
+    summarize as summarize_audit,
+)
+from .faq import (
+    ParagraphRecoveryResult,
+    collect_no_answer_pairs,
+    pair_questions_with_answers,
+    recover_paragraph_faqs,
+)
 from .models import Chunk, ChunkingConfig, SemanticUnit, compute_chunk_id, serialize_chunk, serialize_unit
 from .ordering import restore_source_order
 from .report import build_report
@@ -81,18 +92,22 @@ def _load_records(path: Path) -> List[Dict[str, Any]]:
 
 @dataclass
 class ChunkingResult:
-    """Phase 3 运行结果聚合。"""
+    """Phase 3 + Phase 3.5 运行结果聚合。"""
 
     input_path: Path
     output_units: Path
     output_chunks: Path
     output_report: Path
+    output_audit: Path
 
     input_records: int = 0
     semantic_units: int = 0
     chunks: int = 0
     unit_types: Counter = field(default_factory=Counter)
     chunks_by_type: Counter = field(default_factory=Counter)
+    recovered_pairs: List[Any] = field(default_factory=list)
+    recovery_results: List[Any] = field(default_factory=list)
+    audit_entries: List[AuditEntry] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -266,21 +281,26 @@ def run_chunking_pipeline(
     output_chunks: Path,
     output_report: Path,
     *,
+    output_audit: Optional[Path] = None,
     config: ChunkingConfig | None = None,
     logger: logging.Logger | None = None,
 ) -> ChunkingResult:
-    """运行完整 Phase 3 chunking 流水线。"""
+    """运行完整 Phase 3 + Phase 3.5 chunking 流水线。"""
     log = logger or logging.getLogger("data_pipeline.chunking")
     cfg = config or ChunkingConfig()
+
+    if output_audit is None:
+        output_audit = output_report.parent / "faq_audit.jsonl"
 
     result = ChunkingResult(
         input_path=input_path,
         output_units=output_units,
         output_chunks=output_chunks,
         output_report=output_report,
+        output_audit=output_audit,
     )
 
-    log.info("Phase 3 chunking pipeline started")
+    log.info("Phase 3 + 3.5 chunking pipeline started")
     log.info("Input: %s", input_path)
 
     # 1) 读取 + 恢复源序
@@ -289,25 +309,51 @@ def run_chunking_pipeline(
     ordered_records = restore_source_order(raw_records)
     log.info("Loaded %d records (post-dedup); restored source order", len(ordered_records))
 
-    # 2) FAQ 配对（仅用于统计 unpaired_candidate_count）
+    # 2) Phase 3 FAQ 配对
     paired, unpaired = pair_questions_with_answers(
         ordered_records,
         min_confidence=cfg.faq_min_confidence,
     )
     log.info(
-        "FAQ candidates: paired=%d, unpaired(low/none)=%d",
+        "Phase 3 FAQ: paired=%d, unpaired(low/none)=%d",
         len(paired),
         len(unpaired),
     )
 
-    # 3) 构建 semantic units
-    units = build_semantic_units(ordered_records, config=cfg)
+    # 3) Phase 3.5 paragraph recovery
+    recovered_pairs, recovery_results = recover_paragraph_faqs(
+        ordered_records,
+        phase3_pairs=paired,
+    )
+    log.info(
+        "Phase 3.5 paragraph recovery: recovered=%d, total_candidates=%d",
+        len(recovered_pairs),
+        len(recovery_results),
+    )
+
+    # 4) 收集"有编号但无答案"的候选（用于审计）
+    no_answer_results = collect_no_answer_pairs(ordered_records, paired)
+    log.info("Phase 3 no-answer audit entries: %d", len(no_answer_results))
+
+    # 5) 构建审计条目（合并恢复判定 + 无答案）
+    all_recovery_results = recovery_results + no_answer_results
+    audit_entries = build_audit_entries(ordered_records, all_recovery_results)
+    recovery_summary = summarize_audit(audit_entries)
+    recovery_summary["candidates_checked"] = len(audit_entries)
+    log.info("Audit entries: %s", recovery_summary)
+
+    # 6) 构建 semantic units（含 recovered pair 的拆分）
+    units = build_semantic_units(
+        ordered_records,
+        config=cfg,
+        recovered_pairs=recovered_pairs,
+    )
     log.info("Built %d semantic units", len(units))
     unit_type_counter: Counter = Counter(u.unit_type for u in units)
     for k, v in sorted(unit_type_counter.items(), key=lambda x: -x[1]):
         log.info("    unit_type=%s count=%d", k, v)
 
-    # 4) 构建 chunks
+    # 7) 构建 chunks
     chunks, hard_split_count, overlap_chunk_count, overlap_chars_total = _build_chunks_from_units(
         units, config=cfg,
     )
@@ -317,7 +363,7 @@ def run_chunking_pipeline(
     for k, v in sorted(chunk_type_counter.items(), key=lambda x: -x[1]):
         log.info("    chunk_type=%s count=%d", k, v)
 
-    # 5) 写入输出
+    # 8) 写入输出
     unit_lines = [serialize_unit(u) for u in units]
     chunk_lines = [serialize_chunk(c) for c in chunks]
     _atomic_write_jsonl(output_units, unit_lines)
@@ -325,7 +371,11 @@ def run_chunking_pipeline(
     log.info("Wrote %d units → %s", len(units), output_units)
     log.info("Wrote %d chunks → %s", len(chunks), output_chunks)
 
-    # 6) 报告
+    audit_lines = [serialize_audit(e) for e in audit_entries]
+    _atomic_write_jsonl(output_audit, audit_lines)
+    log.info("Wrote %d audit entries → %s", len(audit_entries), output_audit)
+
+    # 9) 报告
     report = build_report(
         input_records=result.input_records,
         units=units,
@@ -334,6 +384,7 @@ def run_chunking_pipeline(
         hard_split_chunk_count=hard_split_count,
         overlap_chunk_count=overlap_chunk_count,
         overlap_chars_total=overlap_chars_total,
+        faq_recovery_summary=recovery_summary,
     )
     _atomic_write_json(output_report, report)
     log.info("Wrote report → %s", output_report)
@@ -342,4 +393,7 @@ def run_chunking_pipeline(
     result.chunks = len(chunks)
     result.unit_types = unit_type_counter
     result.chunks_by_type = chunk_type_counter
+    result.recovered_pairs = recovered_pairs
+    result.recovery_results = recovery_results
+    result.audit_entries = audit_entries
     return result
