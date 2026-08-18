@@ -42,8 +42,6 @@ from .models import (
     SFTSample,
     SFTBuildConfig,
     SPLIT_BUCKET_TOTAL,
-    SPLIT_TRAIN_END,
-    SPLIT_VALIDATION_END,
 )
 
 # 置信度大小关系；用于把字符串映射为可比较整数。
@@ -59,22 +57,55 @@ _CONFIDENCE_RANK = {"none": 0, "low": 1, "medium": 2, "high": 3}
 class SFTBuildResult:
     """Phase 4 一次完整运行的汇总结果。"""
 
+    # Phase 4 输入的 semantic_units.jsonl 路径
     input_path: Path
+
+    # 全量 accepted SFT 样本输出路径
     output_all: Path
+
+    # 训练集输出路径
     output_train: Path
+
+    # 验证集输出路径
     output_validation: Path
+
+    # 测试集输出路径
     output_test: Path
+
+    # 被剔除样本输出路径
     output_rejected: Path
+
+    # 数据集质量报告输出路径
     output_report: Path
 
-    # 阶段计数；只放聚合数字，详细字段在 report 中
+    # semantic_units.jsonl 总记录数（含所有 unit_type）
     input_units: int = 0
+
+    # 其中所有 unit_type == "faq" 的数量（不再受 confidence 影响）
     input_faq_units: int = 0
+
+    # 通过 min_confidence 阈值、进入下一步构造的 FAQ 数量
+    eligible_faq_units: int = 0
+
+    # 低于 min_confidence 阈值、被置信度过滤掉的 FAQ 数量
+    filtered_by_confidence: int = 0
+
+    # 最终进入 all.jsonl 的 accepted 样本数
     accepted_samples: int = 0
+
+    # 进入 rejected.jsonl 的样本数（含 below_min_confidence / dedup / conflict / 字段校验失败）
     rejected_samples: int = 0
+
+    # exact q+a 重复而被剔除的样本数（canonical 仍计入 accepted）
     duplicate_samples: int = 0
+
+    # 同问不同答冲突的题目组数
     conflicting_question_groups: int = 0
+
+    # 同问不同答冲突被整组剔除的样本数
     conflicting_samples: int = 0
+
+    # train / validation / test 各自分到的样本数
     splits: Counter = field(default_factory=Counter)
 
 
@@ -121,11 +152,32 @@ def _bucket_for(group_key: str, salt: str) -> int:
     return int(digest[:8], 16) % SPLIT_BUCKET_TOTAL
 
 
-def _bucket_to_split(bucket: int) -> str:
-    """把 bucket 整数映射到 train / validation / test。"""
-    if bucket < SPLIT_TRAIN_END:
+def _compute_split_boundaries(config: SFTBuildConfig, total: int = SPLIT_BUCKET_TOTAL) -> Tuple[int, int]:
+    """根据 config 中的 ratio 计算 bucket 边界。
+
+    返回 ``(train_end, validation_end)``：
+
+    - ``[0, train_end)``        → train
+    - ``[train_end, validation_end)`` → validation
+    - ``[validation_end, total)``     → test
+
+    边界由 ``round(ratio * total)`` 计算；与 config 完全一致，
+    不再依赖任何硬编码业务常量。
+    """
+    train_end = round(config.train_ratio * total)
+    validation_end = round((config.train_ratio + config.validation_ratio) * total)
+    # 防御性夹紧：保证 train_end <= validation_end <= total
+    train_end = max(0, min(total, train_end))
+    validation_end = max(train_end, min(total, validation_end))
+    return train_end, validation_end
+
+
+def _bucket_to_split(bucket: int, config: SFTBuildConfig) -> str:
+    """把 bucket 整数映射到 train / validation / test；边界来自 config。"""
+    train_end, validation_end = _compute_split_boundaries(config)
+    if bucket < train_end:
         return "train"
-    if bucket < SPLIT_VALIDATION_END:
+    if bucket < validation_end:
         return "validation"
     return "test"
 
@@ -208,19 +260,31 @@ def _validate_sample_messages(sample: SFTSample) -> List[str]:
 # ---------------------------------------------------------------------------
 
 
-def _filter_faq_units(units: List[Dict[str, Any]], min_confidence: str) -> List[Dict[str, Any]]:
-    """从所有 semantic units 中筛出 FAQ，并按 ``min_confidence`` 过滤。"""
+def _filter_faq_units(
+    units: List[Dict[str, Any]],
+    min_confidence: str,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """从所有 semantic units 中分出 FAQ，并按 ``min_confidence`` 切分。
+
+    返回 ``(eligible_units, below_min_confidence_units)``：
+
+    - ``eligible_units``：unit_type=="faq" 且 faq_confidence ≥ min_confidence；
+    - ``below_min_confidence_units``：unit_type=="faq" 但 faq_confidence 不足，
+      这些不会被静默丢弃，会在 pipeline 中写入 rejected.jsonl。
+    """
     threshold = _CONFIDENCE_RANK[min_confidence]
-    out: List[Dict[str, Any]] = []
+    eligible: List[Dict[str, Any]] = []
+    below: List[Dict[str, Any]] = []
     for u in units:
         if u.get("unit_type") != "faq":
             continue
         conf = u.get("faq_confidence")
         rank = _CONFIDENCE_RANK.get(conf, 0)
         if rank < threshold:
+            below.append(u)
             continue
-        out.append(u)
-    return out
+        eligible.append(u)
+    return eligible, below
 
 
 # ---------------------------------------------------------------------------
@@ -325,7 +389,7 @@ def _assign_splits(
         q = sample.messages[0]["content"]
         group_key = _make_split_group_key(_normalize_for_compare(q))
         bucket = _bucket_for(group_key, config.split_salt)
-        splits[_bucket_to_split(bucket)].append(sample)
+        splits[_bucket_to_split(bucket, config)].append(sample)
     for k in splits:
         splits[k].sort(key=lambda s: s.sample_id)
     return splits
@@ -375,6 +439,8 @@ def _length_stats(values: List[int]) -> Dict[str, float]:
 def build_report(
     input_units: int,
     input_faq_units: int,
+    eligible_faq_units: int,
+    filtered_by_confidence: int,
     accepted_samples: List[SFTSample],
     rejected_samples: List[Dict[str, Any]],
     duplicate_samples: int,
@@ -422,9 +488,13 @@ def build_report(
     test_n = len(splits["test"])
     total_split = max(1, train_n + valid_n + test_n)
 
+    train_end, validation_end = _compute_split_boundaries(config)
+
     return {
         "input_units": input_units,
         "input_faq_units": input_faq_units,
+        "eligible_faq_units": eligible_faq_units,
+        "filtered_by_confidence": filtered_by_confidence,
         "accepted_samples": accepted_count,
         "rejected_samples": rejected_count,
         "duplicate_samples": duplicate_samples,
@@ -448,6 +518,11 @@ def build_report(
             "train": config.train_ratio,
             "validation": config.validation_ratio,
             "test": config.test_ratio,
+        },
+        "split_bucket_boundaries": {
+            "bucket_total": SPLIT_BUCKET_TOTAL,
+            "train_end": train_end,
+            "validation_end": validation_end,
         },
         "split_salt": config.split_salt,
         "question_length": _length_stats(q_lengths),
@@ -530,14 +605,32 @@ def run_sft_pipeline(
     result.input_units = len(units)
     log.info("Loaded %d semantic units", len(units))
 
-    # 2) 只保留 FAQ + 最低置信度
-    faq_units = _filter_faq_units(units, cfg.min_confidence)
-    result.input_faq_units = len(faq_units)
-    log.info("FAQ units after confidence filter: %d", len(faq_units))
+    # 2) 只保留 FAQ；按 min_confidence 切分为 eligible / below_min_confidence
+    faq_units_all = [u for u in units if u.get("unit_type") == "faq"]
+    result.input_faq_units = len(faq_units_all)
+    faq_units, below_min = _filter_faq_units(units, cfg.min_confidence)
+    result.eligible_faq_units = len(faq_units)
+    result.filtered_by_confidence = len(below_min)
+    log.info(
+        "FAQ units: total=%d, eligible=%d, below_min_confidence=%d",
+        result.input_faq_units, result.eligible_faq_units, result.filtered_by_confidence,
+    )
 
     # 3) 构造 sample + 字段校验
     accepted_pairs: List[Tuple[Dict[str, Any], SFTSample]] = []
     rejected: List[Dict[str, Any]] = []
+
+    # 3a) 先把低于置信度的 FAQ 写入 rejected.jsonl，避免静默消失
+    for u in below_min:
+        rejected.append({
+            "unit_id": u.get("unit_id"),
+            "question_text": u.get("question_text"),
+            "answer_text": u.get("answer_text"),
+            "faq_confidence": u.get("faq_confidence"),
+            "required_min_confidence": cfg.min_confidence,
+            "reject_reasons": ["below_min_confidence"],
+        })
+
     for u in faq_units:
         reasons = _validate_unit_basic(u)
         if reasons:
@@ -626,6 +719,8 @@ def run_sft_pipeline(
     report = build_report(
         input_units=result.input_units,
         input_faq_units=result.input_faq_units,
+        eligible_faq_units=result.eligible_faq_units,
+        filtered_by_confidence=result.filtered_by_confidence,
         accepted_samples=all_samples_sorted,
         rejected_samples=rejected_sorted,
         duplicate_samples=duplicate_count,

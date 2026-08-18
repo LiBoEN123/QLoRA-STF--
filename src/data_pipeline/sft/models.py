@@ -22,11 +22,11 @@ from typing import Any, Dict, List
 # low/none 拒绝进入正式训练集。
 VALID_MIN_CONFIDENCE = ("high", "medium")
 
-# 10000 个 bucket，按 90/5/5 划分 train/validation/test。
+# 确定性划分的固定 bucket 总数（0..SPLIT_BUCKET_TOTAL-1）。
+# train/validation/test 边界来自 SFTBuildConfig 的 ratio，
+# 例如 train_ratio=0.90 ⇒ train_end = round(0.90 * SPLIT_BUCKET_TOTAL) = 9000。
+# 不再硬编码业务边界，避免 config 形同虚设。
 SPLIT_BUCKET_TOTAL = 10000
-SPLIT_TRAIN_END = 9000       # [0, 9000)        → train
-SPLIT_VALIDATION_END = 9500  # [9000, 9500)      → validation
-# [9500, 10000)              → test
 
 # 默认固定划分盐值；任何变更都会改变所有 split 分配。
 DEFAULT_SPLIT_SALT = "qlora-sft-phase4-v1"

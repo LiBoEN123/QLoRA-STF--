@@ -417,9 +417,9 @@ python scripts/build_sft_dataset.py \
   --report            data/sft/dataset_report.json \
   --log-file          logs/build_sft_dataset.log \
   --min-confidence    medium \
-  --train-ratio       0.90 \
-  --validation-ratio  0.05 \
-  --test-ratio        0.05 \
+  --train-ratio       0.80 \
+  --validation-ratio  0.10 \
+  --test-ratio        0.10 \
   --split-salt        qlora-sft-phase4-v1
 ```
 
@@ -473,7 +473,7 @@ python scripts/build_sft_dataset.py \
 - **不调用 LLM / 不加载 tokenizer / 不训练模型**：Phase 4 严格止步于「FAQ → messages → 质量审计 → 划分」。
 - **公共 IO**：所有原子写文件逻辑（`atomic_write_json` / `atomic_write_jsonl` / `load_jsonl_records`）只维护于 `src/data_pipeline/utils.py`，Phase 1 / 2 / 3 / 4 全部复用。
 - **中文注释**：所有新增/修改代码的注释、docstring、CLI 参数说明、日志内容均优先使用中文；类名 / 函数名 / 字段名 / JSON key / CLI 参数继续使用规范英文命名。
-- **类字段中文注释强制**：所有新增 dataclass 的每一个字段前必须存在中文说明注释。
+- **类字段中文注释强制**：所有新增 dataclass / class 的每一个字段前必须存在独立中文说明注释（每个字段一行）。后续 `test_sft_dataclasses_have_chinese_field_comments` 会扫描整个 `src/data_pipeline/sft/` 下所有 dataclass，新增字段无需手改测试。
 
 ### Phase 4 模块结构
 

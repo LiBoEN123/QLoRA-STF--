@@ -150,9 +150,9 @@ def test_only_faq_units_pass_filter():
         _faq_unit("u5", "Q5?", "A5.", unit_type="paragraph_group"),
         _faq_unit("u6", "Q6?", "A6.", unit_type="subheading"),
     ]
-    faqs = _filter_faq_units(units, "medium")
-    assert len(faqs) == 2
-    assert {u["unit_id"] for u in faqs} == {"u1", "u2"}
+    eligible, _below = _filter_faq_units(units, "medium")
+    assert len(eligible) == 2
+    assert {u["unit_id"] for u in eligible} == {"u1", "u2"}
 
 
 def test_confidence_filter():
@@ -162,10 +162,12 @@ def test_confidence_filter():
         _faq_unit("m", "Q2", "A2", faq_confidence="medium"),
         _faq_unit("l", "Q3", "A3", faq_confidence="low"),
     ]
-    faqs = _filter_faq_units(units, "medium")
-    assert {u["unit_id"] for u in faqs} == {"h", "m"}
-    faqs = _filter_faq_units(units, "high")
-    assert {u["unit_id"] for u in faqs} == {"h"}
+    eligible, below = _filter_faq_units(units, "medium")
+    assert {u["unit_id"] for u in eligible} == {"h", "m"}
+    assert {u["unit_id"] for u in below} == {"l"}
+    eligible, below = _filter_faq_units(units, "high")
+    assert {u["unit_id"] for u in eligible} == {"h"}
+    assert {u["unit_id"] for u in below} == {"m", "l"}
 
 
 # ---------------------------------------------------------------------------
@@ -727,30 +729,264 @@ def test_traceability_metadata_complete(tmp_outputs: dict[str, Path]):
 
 
 def test_sft_models_have_chinese_field_comments():
-    """新增 dataclass 字段前必须有中文注释（源代码约定）。"""
+    """新增 dataclass 字段前必须有中文注释（源代码约定）。
+
+    自动扫描 ``src/data_pipeline/sft/`` 下所有 ``@dataclass`` 类。
+    新增业务 dataclass 无需手动维护：测试会从源码中提取 dataclass
+    名称并逐字段校验"前两行内包含中文字符"。
+    """
+    import ast
+
     src_dir = Path(__file__).resolve().parents[1] / "src" / "data_pipeline" / "sft"
-    targets = {
-        "models.py": ["SFTBuildConfig", "SFTSample"],
-    }
-    for fname, class_names in targets.items():
-        text = (src_dir / fname).read_text(encoding="utf-8")
-        for cls in class_names:
-            # 找类定义范围（不严格 AST，简单 grep 即可）
+
+    def _collect_dataclasses(py_file: Path) -> dict[str, list[str]]:
+        tree = ast.parse(py_file.read_text(encoding="utf-8"))
+        out: dict[str, list[str]] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                is_dc = any(
+                    (isinstance(d, ast.Name) and d.id == "dataclass")
+                    or (isinstance(d, ast.Attribute) and d.attr == "dataclass")
+                    for d in node.decorator_list
+                )
+                if not is_dc:
+                    continue
+                fields = [
+                    t.target.id  # type: ignore[attr-defined]
+                    for t in node.body
+                    if isinstance(t, ast.AnnAssign) and isinstance(t.target, ast.Name)
+                ]
+                if fields:
+                    out[node.name] = fields
+        return out
+
+    for py_file in sorted(src_dir.glob("*.py")):
+        cls_to_fields = _collect_dataclasses(py_file)
+        if not cls_to_fields:
+            # __init__.py 等纯 re-export 文件无 dataclass，跳过
+            continue
+        text = py_file.read_text(encoding="utf-8")
+        for cls, fields in cls_to_fields.items():
             cls_idx = text.find(f"class {cls}")
-            assert cls_idx >= 0, f"class {cls} not found in {fname}"
-            # 类后到下一个顶级 def/class 之前
+            assert cls_idx >= 0, f"class {cls} not found in {py_file.name}"
             tail = text[cls_idx:]
-            # 找下一个 class / def 边界
-            next_boundary = re.search(r"^class\s+\w+|^def\s+\w+|^@\w+", tail[len(f"class {cls}"):], re.MULTILINE)
+            next_boundary = re.search(
+                r"^class\s+\w+|^def\s+\w+|^@\w+",
+                tail[len(f"class {cls}"):],
+                re.MULTILINE,
+            )
             cls_body = tail[: len(f"class {cls}") + (next_boundary.start() if next_boundary else len(tail))]
-            for field_name in re.findall(r"^\s{4}(\w+)\s*[:=]", cls_body, re.MULTILINE):
-                # 该字段前两行内必须有中文字符
+            for field_name in fields:
                 field_pattern = re.compile(
                     r"(?:^|\n)([^\n]*\n[^\n]*\n)?[ \t]*" + re.escape(field_name) + r"\s*[:=]"
                 )
                 m = field_pattern.search(cls_body)
-                assert m, f"field {field_name!r} not found in {cls}"
+                assert m, f"field {field_name!r} not found in {cls} ({py_file.name})"
                 preceding = (m.group(1) or "")
                 assert re.search(r"[\u4e00-\u9fff]", preceding), (
-                    f"字段 {cls}.{field_name} 前两行缺少中文注释（src: {fname}）"
+                    f"字段 {cls}.{field_name} 前两行缺少中文注释（src: {py_file.name}）"
                 )
+
+
+# ---------------------------------------------------------------------------
+# Phase 4.1 — split ratio / confidence accounting
+# ---------------------------------------------------------------------------
+
+
+def _run_pipeline_with_units(tmp_path: Path, units: list[dict], cfg: SFTBuildConfig) -> dict:
+    """以 cfg 跑一次 pipeline，返回 result + report。"""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    paths = {
+        "input": tmp_path / "semantic_units.jsonl",
+        "all": tmp_path / "all.jsonl",
+        "train": tmp_path / "train.jsonl",
+        "validation": tmp_path / "validation.jsonl",
+        "test": tmp_path / "test.jsonl",
+        "rejected": tmp_path / "rejected.jsonl",
+        "report": tmp_path / "dataset_report.json",
+    }
+    _write_units(paths["input"], units)
+    result = run_sft_pipeline(
+        input_path=paths["input"],
+        output_all=paths["all"],
+        output_train=paths["train"],
+        output_validation=paths["validation"],
+        output_test=paths["test"],
+        output_rejected=paths["rejected"],
+        output_report=paths["report"],
+        config=cfg,
+    )
+    report = json.loads(paths["report"].read_text(encoding="utf-8"))
+    return {"result": result, "report": report, "paths": paths}
+
+
+def _ratio_distribution(splits: dict[str, int]) -> dict[str, float]:
+    """把 splits count 字典转成比例字典。"""
+    total = max(1, splits["train"] + splits["validation"] + splits["test"])
+    return {
+        "train": splits["train"] / total,
+        "validation": splits["validation"] / total,
+        "test": splits["test"] / total,
+    }
+
+
+def test_default_90_5_5_still_holds(tmp_path: Path):
+    """默认 90/5/5 仍生效（不破坏现有行为）。"""
+    units = [_faq_unit(f"u{i:04d}", f"问题{i}", f"答案{i}") for i in range(2000)]
+    cfg = SFTBuildConfig()
+    out = _run_pipeline_with_units(tmp_path, units, cfg)
+    r = out["splits"] = out["result"].splits
+    total = r["train"] + r["validation"] + r["test"]
+    assert total == 2000
+    ratios = _ratio_distribution(r)
+    assert 0.87 <= ratios["train"] <= 0.93
+    assert 0.02 <= ratios["validation"] <= 0.08
+    assert 0.02 <= ratios["test"] <= 0.08
+    # report 边界应等于 config 推导
+    b = out["report"]["split_bucket_boundaries"]
+    assert b == {"bucket_total": 10000, "train_end": 9000, "validation_end": 9500}
+
+
+def test_custom_split_ratio_80_10_10_is_effective(tmp_path: Path):
+    """自定义 80/10/10 必须真实影响划分，不能被硬编码 90/5/5 覆盖。"""
+    units = [_faq_unit(f"u{i:04d}", f"问题{i}", f"答案{i}") for i in range(2000)]
+
+    cfg_default = SFTBuildConfig()
+    cfg_80 = SFTBuildConfig(
+        train_ratio=0.80,
+        validation_ratio=0.10,
+        test_ratio=0.10,
+    )
+
+    out_default = _run_pipeline_with_units(tmp_path / "default", units, cfg_default)
+    out_80 = _run_pipeline_with_units(tmp_path / "r80", units, cfg_80)
+
+    r80 = out_80["result"].splits
+    total_80 = r80["train"] + r80["validation"] + r80["test"]
+    assert total_80 == 2000
+    ratios = _ratio_distribution(r80)
+    # 2000 样本下 ±0.03 已足够稳健
+    assert 0.77 <= ratios["train"] <= 0.83, ratios
+    assert 0.07 <= ratios["validation"] <= 0.13, ratios
+    assert 0.07 <= ratios["test"] <= 0.13, ratios
+
+    # 实际样本数确实发生变化（不能只看 config 存了 0.8）
+    assert r80["train"] < out_default["result"].splits["train"]
+    assert r80["validation"] > out_default["result"].splits["validation"]
+    assert r80["test"] > out_default["result"].splits["test"]
+
+    # report 同步：target 与 actual
+    tgt = out_80["report"]["split_ratios_target"]
+    assert tgt == {"train": 0.80, "validation": 0.10, "test": 0.10}
+    b = out_80["report"]["split_bucket_boundaries"]
+    assert b == {"bucket_total": 10000, "train_end": 8000, "validation_end": 9000}
+
+
+def test_custom_split_ratio_70_20_10_is_effective(tmp_path: Path):
+    """自定义 70/20/10 也必须真实生效。"""
+    units = [_faq_unit(f"u{i:05d}", f"问题{i}", f"答案{i}") for i in range(5000)]
+    cfg = SFTBuildConfig(
+        train_ratio=0.70,
+        validation_ratio=0.20,
+        test_ratio=0.10,
+    )
+    out = _run_pipeline_with_units(tmp_path, units, cfg)
+    r = out["result"].splits
+    total = r["train"] + r["validation"] + r["test"]
+    assert total == 5000
+    ratios = _ratio_distribution(r)
+    # 5000 样本下允许 ±0.02
+    assert 0.68 <= ratios["train"] <= 0.72, ratios
+    assert 0.18 <= ratios["validation"] <= 0.22, ratios
+    assert 0.08 <= ratios["test"] <= 0.12, ratios
+    b = out["report"]["split_bucket_boundaries"]
+    assert b == {"bucket_total": 10000, "train_end": 7000, "validation_end": 9000}
+
+
+def test_confidence_accounting_with_high_threshold(tmp_path: Path):
+    """min_confidence=high 时：medium FAQ 进入 rejected，accounting 完整。"""
+    units = [
+        _faq_unit("h1", "Q-High-1", "A-High-1", faq_confidence="high"),
+        _faq_unit("h2", "Q-High-2", "A-High-2", faq_confidence="high"),
+        _faq_unit("m1", "Q-Med-1", "A-Med-1", faq_confidence="medium"),
+        _faq_unit("m2", "Q-Med-2", "A-Med-2", faq_confidence="medium"),
+    ]
+    cfg = SFTBuildConfig(min_confidence="high")
+    out = _run_pipeline_with_units(tmp_path, units, cfg)
+    result = out["result"]
+    report = out["report"]
+
+    # input_faq_units = 所有 FAQ（不受 confidence 影响）
+    assert result.input_faq_units == 4
+    # eligible / filtered 明确区分
+    assert result.eligible_faq_units == 2
+    assert result.filtered_by_confidence == 2
+    assert report["input_faq_units"] == 4
+    assert report["eligible_faq_units"] == 2
+    assert report["filtered_by_confidence"] == 2
+
+    # accepted + rejected = input_faq_units（完整 accounting）
+    assert result.accepted_samples + result.rejected_samples == 4
+    assert result.accepted_samples == 2  # 2 high 都进入 accepted
+
+    # rejected.jsonl 含 2 条 below_min_confidence
+    rejected = [
+        json.loads(l)
+        for l in out["paths"]["rejected"].read_text(encoding="utf-8").splitlines()
+        if l
+    ]
+    below = [r for r in rejected if "below_min_confidence" in r["reject_reasons"]]
+    assert len(below) == 2
+    for r in below:
+        assert r["faq_confidence"] == "medium"
+        assert r["required_min_confidence"] == "high"
+        assert sorted(r["reject_reasons"]) == ["below_min_confidence"]
+
+
+def test_confidence_accounting_default_medium_does_not_degrade(tmp_path: Path):
+    """min_confidence=medium 时：默认数据下 filtered_by_confidence 应为 0。"""
+    units = [
+        _faq_unit("h1", "Q-High-1", "A-High-1", faq_confidence="high"),
+        _faq_unit("h2", "Q-High-2", "A-High-2", faq_confidence="high"),
+        _faq_unit("m1", "Q-Med-1", "A-Med-1", faq_confidence="medium"),
+        _faq_unit("m2", "Q-Med-2", "A-Med-2", faq_confidence="medium"),
+    ]
+    cfg = SFTBuildConfig(min_confidence="medium")
+    out = _run_pipeline_with_units(tmp_path, units, cfg)
+    result = out["result"]
+    report = out["report"]
+
+    assert result.input_faq_units == 4
+    assert result.eligible_faq_units == 4
+    assert result.filtered_by_confidence == 0
+    assert report["input_faq_units"] == 4
+    assert report["eligible_faq_units"] == 4
+    assert report["filtered_by_confidence"] == 0
+
+    # 无其它质量问题 → accepted = 4, rejected = 0
+    assert result.accepted_samples == 4
+    assert result.rejected_samples == 0
+    assert result.accepted_samples + result.rejected_samples == 4
+
+
+def test_rejected_records_are_stable_sorted(tmp_path: Path):
+    """rejected.jsonl 必须稳定排序：相同输入下每次输出 byte-for-byte 一致。"""
+    units = [
+        _faq_unit("a_low", "Q-A", "A-A", faq_confidence="medium"),
+        _faq_unit("b_dup", "Q-B", "A-B"),
+        _faq_unit("c_dup", "Q-B", "A-B"),  # dup → rejected
+        _faq_unit("d_empty", "Q-D", ""),   # empty answer → rejected
+        _faq_unit("e_high", "Q-E", "A-E", faq_confidence="high"),
+    ]
+    cfg = SFTBuildConfig(min_confidence="high")
+    out1 = _run_pipeline_with_units(tmp_path / "r1", units, cfg)
+    out2 = _run_pipeline_with_units(tmp_path / "r2", units, cfg)
+    rejected1 = out1["paths"]["rejected"].read_bytes()
+    rejected2 = out2["paths"]["rejected"].read_bytes()
+    assert rejected1 == rejected2
+    # 至少包含 3 条 below_min_confidence + duplicate_sample + empty_answer
+    lines = [l for l in rejected1.decode("utf-8").splitlines() if l]
+    reasons = [tuple(sorted(json.loads(l)["reject_reasons"])) for l in lines]
+    assert ("below_min_confidence",) in reasons
+    assert ("duplicate_sample",) in reasons
+    assert ("empty_answer",) in reasons

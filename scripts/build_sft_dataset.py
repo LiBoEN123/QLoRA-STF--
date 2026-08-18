@@ -6,7 +6,14 @@
 用法：
 
     python scripts/build_sft_dataset.py
-    python scripts/build_sft_dataset.py --min-confidence high --train-ratio 0.8
+
+    # 自定义 80/10/10（注意：三个 ratio 必须和为 1.0）
+    python scripts/build_sft_dataset.py \
+      --min-confidence     medium \
+      --train-ratio        0.80 \
+      --validation-ratio   0.10 \
+      --test-ratio         0.10
+
     python scripts/build_sft_dataset.py --input data/chunks/semantic_units.jsonl
 """
 
