@@ -9,9 +9,10 @@
 2. **Phase 2 — Cleaning**：文本清洗、结构恢复、质量过滤、SimHash 去重。
 3. **Phase 3 — Semantic Unit + FAQ + Chunking**：Semantic Unit 恢复 + FAQ 配对 + 结构感知 Chunking。
 4. **Phase 4 — SFT Dataset Construction**：把 FAQ SemanticUnit 转成标准 chat-style SFT messages，做数据质量审计与 Train/Val/Test 确定性划分。
-5. **Phase 5 — Tokenizer Validation + QLoRA Training Preparation / Training**（后续）。
+5. **Phase 5A — Qwen3 Tokenizer Validation**：通过 `AutoTokenizer.apply_chat_template` 对 SFT 数据做 token 长度、prompt prefix match、coverage、thinking marker 等审计，不加载模型权重、不初始化 GPU、不训练。
+6. **Phase 5B — QLoRA Training Preparation / Training**（后续）。
 
-> Phase 1 + Phase 2 + Phase 3 + Phase 4 已实现。Phase 4 仍然**不会**调用任何 LLM、不会加载 tokenizer、不会训练模型——只把 Phase 3 已经确认的可靠 FAQ 稳定、无损、可追溯地转换成标准 Chat-style SFT 数据集。
+> Phase 1 + Phase 2 + Phase 3 + Phase 4 + Phase 5A 已实现。Phase 4 仍然**不会**调用任何 LLM、不会加载 tokenizer、不会训练模型——只把 Phase 3 已经确认的可靠 FAQ 稳定、无损、可追溯地转换成标准 Chat-style SFT 数据集。Phase 5A 仅加载 `AutoTokenizer`（CPU），不下载 8B 模型权重，不引入 QLoRA / Trainer / LoRAConfig。
 > Phase 3 在历史迭代中曾为了恢复少量边界 FAQ 临时引入"Phase 3.5"的额外恢复流程，当前已合并回收——仅保留唯一的"一次检测 + 一次配对"主链。
 
 ---
@@ -493,4 +494,105 @@ tests/
 
 ### 后续阶段（暂不实现）
 
-- Phase 5：Tokenizer Validation + QLoRA Training Preparation / Training。
+- Phase 5B：QLoRA Training Preparation / Training。
+
+---
+
+## Phase 5A — Qwen3 Tokenizer Validation
+
+Phase 5A 直接消费 Phase 4 的 `data/sft/`，**只**调用 `AutoTokenizer.apply_chat_template` 做训练前 token 长度审计；不加载 `AutoModelForCausalLM`、不初始化 CUDA、不训练模型、不生成任何训练样本的 `input_ids` / `attention_mask` / `labels`。
+
+### 数据流
+
+```text
+data/sft/
+    ├── all.jsonl
+    ├── train.jsonl
+    ├── validation.jsonl
+    └── test.jsonl
+        ↓
+Phase 5A Tokenizer Audit
+    ├── 校验 split membership（all ⊆ train ∪ validation ∪ test，互斥）
+    ├── 加载 Qwen3 tokenizer（AutoTokenizer, use_fast=True, trust_remote_code=False）
+    ├── synthetic messages 渲染 + roundtrip 验证
+    ├── 扫描 source messages 中是否有 <think> / </think> / reasoning_content 痕迹
+    ├── 逐 sample:
+    │     apply_chat_template(messages, add_generation_prompt=False, enable_thinking=False)
+    │     apply_chat_template(messages[:1], add_generation_prompt=True, enable_thinking=False)
+    │     校验 prompt prefix match + assistant_target_tokens > 0
+    ├── 长度统计（min/mean/median/p90/p95/p99/max，full / prompt / assistant_target）
+    ├── split 统计（train / validation / test 各自 count + mean/p95/max）
+    ├── 候选 max_seq_length coverage（512 / 1024 / 1536 / 2048 / 3072 / 4096）
+    ├── 95% / 99% / 100% coverage threshold
+    └── longest 20 samples（仅定位 metadata，不复制答案）
+        ↓
+data/tokenizer/token_audit.jsonl
+data/tokenizer/token_report.json
+logs/audit_token_lengths.log
+```
+
+### 运行
+
+```bash
+# 安装依赖
+pip install -r requirements.txt
+
+# 默认（读 data/sft → 写 data/tokenizer/，加载 Qwen/Qwen3-8B tokenizer）
+python scripts/audit_token_lengths.py
+
+# 自定义路径 / 模型仓库
+python scripts/audit_token_lengths.py \
+    --sft-dir     data/sft \
+    --model-name  Qwen/Qwen3-8B \
+    --revision    main \
+    --output-audit   data/tokenizer/token_audit.jsonl \
+    --output-report  data/tokenizer/token_report.json \
+    --log-file       logs/audit_token_lengths.log \
+    --log-level      INFO
+```
+
+### 输出
+
+| 路径 | 含义 |
+| --- | --- |
+| `data/tokenizer/token_audit.jsonl` | 每条 accepted SFT 样本一条轻量审计记录（不含 `input_ids` / 原文） |
+| `data/tokenizer/token_report.json` | 汇总：模型/tokenizer 元数据、长度统计、split 统计、coverage、threshold、longest 20、source thinking 扫描 |
+| `logs/audit_token_lengths.log` | 详细运行日志 |
+
+### 关键规则
+
+- **只加载 `AutoTokenizer`**（+ 可选 `AutoConfig`），**不**加载 `AutoModelForCausalLM`，**不**调用 `torch.cuda`。
+- **唯一真值**：`tokenizer.apply_chat_template(...)`；**禁止**手工拼 ChatML、维护第二份 chat template、手工 `replace("<think>", "")`。
+- **Non-thinking SFT**：固定 `enable_thinking=False`；不暴露 `enable_thinking=True` 作为训练路径。
+- **Full conversation**：`add_generation_prompt=False`；**Prompt only**：`add_generation_prompt=True`。
+- **不裁、不填**：`truncation=False`、`padding=False`，只统计 raw `len(input_ids)`。
+- **Prefix property**：`full[:len(prompt)] == prompt` 必须对所有 accepted sample 成立，否则 `assistant_only_loss_feasible=False`。
+- **不修改 SFT 数据**：不重写 `messages`、不动 Phase 1/2/3/4 任何上游文件。
+- **不构造 `labels` / `attention_mask`**：仅判定未来能否安全做 assistant-only loss；具体 collator 留给 Phase 5B。
+- **确定性**：相同 SFT 数据 + 相同 tokenizer revision + 相同 config ⇒ `token_audit.jsonl` 与 `token_report.json` byte-for-byte 一致；report 不含任何 `timestamp` / `runtime` / `hostname`。
+- **不决定 max_seq_length**：只报告 95/99/100% 覆盖候选；最终训练长度由 Phase 5B 综合显存 / batch / 业务决定。
+- **不启用 YaRN / 不修改 rope_scaling**：本阶段只读模型 config。
+- **类字段中文注释强制**：本阶段新增的 `dataclass` 字段前必须有独立中文说明（与 Phase 4 同约定）。
+- **公共 IO**：所有原子写文件逻辑继续复用 `src/data_pipeline/utils.py` 的 `atomic_write_json` / `atomic_write_jsonl` / `load_jsonl_records`。
+
+### Phase 5A 模块结构
+
+```text
+src/data_pipeline/
+└── tokenization/
+    ├── __init__.py
+    ├── models.py        # TokenizerAuditConfig
+    └── pipeline.py      # run_tokenizer_audit（唯一入口）
+
+scripts/
+└── audit_token_lengths.py  # CLI
+
+tests/
+└── test_tokenizer_audit.py # 单元测试 + FakeTokenizer（默认不联网）
+                              # 真实 Qwen3 tokenizer 集成测试需
+                              # RUN_QWEN_TOKENIZER_INTEGRATION=1
+```
+
+### 后续阶段（暂不实现）
+
+- Phase 5B：QLoRA Training Preparation / Training（构造 `input_ids` / `labels` collator、加载 `AutoModelForCausalLM` + `BitsAndBytesConfig` + `LoRAConfig`、`SFTTrainer`、4-bit 训练循环等）。

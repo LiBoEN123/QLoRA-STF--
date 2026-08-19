@@ -2,3 +2,10 @@ PyMuPDF>=1.24.0
 python-docx>=1.1.0
 openpyxl>=3.1.0
 beautifulsoup4>=4.12.0
+
+# Phase 5A：Qwen3 tokenizer 验证
+# Qwen3 architecture 需要 transformers >= 4.51
+transformers>=4.51.0
+
+# transformers 的 apply_chat_template 依赖 jinja2
+jinja2>=3.1.0

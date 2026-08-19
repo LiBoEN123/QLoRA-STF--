@@ -19,6 +19,7 @@ data/extracted/**
 data/processed/**
 data/chunks/**
 data/sft/**
+data/tokenizer/**
 logs/**
 
 # Temporary development scripts
