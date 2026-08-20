@@ -197,6 +197,32 @@ def test_verify_split_membership_missing_split(tmp_path: Path):
         _verify_split_membership(all_records, membership)
 
 
+def test_verify_split_membership_rejects_extra_split_sample(tmp_path: Path):
+    """train.jsonl 含 all.jsonl 没有的 sample → 必须抛硬异常（不能仅写 report）。"""
+    sft_dir = tmp_path / "sft"
+    sft_dir.mkdir()
+    all_sample = _sft_sample("sft_in_all", "Q?", "A.")
+    extra = _sft_sample("sft_extra", "Q2?", "A2.")
+    (sft_dir / "all.jsonl").write_text(
+        json.dumps(all_sample, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    (sft_dir / "train.jsonl").write_text(
+        json.dumps(all_sample, ensure_ascii=False) + "\n" + json.dumps(extra, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    (sft_dir / "validation.jsonl").write_text("\n", encoding="utf-8")
+    (sft_dir / "test.jsonl").write_text("\n", encoding="utf-8")
+
+    with pytest.raises(TokenizerAuditError):
+        run_tokenizer_audit(
+            sft_dir=sft_dir,
+            output_audit_jsonl=tmp_path / "audit.jsonl",
+            output_report_json=tmp_path / "report.json",
+            config=TokenizerAuditConfig(real_sample_check_per_split=0),
+        )
+
+
 # ---------------------------------------------------------------------------
 # 2. prompt prefix match + assistant target token count
 # ---------------------------------------------------------------------------

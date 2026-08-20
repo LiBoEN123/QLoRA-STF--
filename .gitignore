@@ -20,6 +20,9 @@ data/processed/**
 data/chunks/**
 data/sft/**
 data/tokenizer/**
+data/training/**
+!data/training/.gitkeep
+outputs/**
 logs/**
 
 # Temporary development scripts

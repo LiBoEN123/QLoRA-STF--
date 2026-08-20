@@ -1,0 +1,12 @@
+-r requirements.txt
+
+datasets>=3.0
+accelerate>=1.0
+peft>=0.13
+trl>=0.12
+bitsandbytes>=0.45
+
+# torch 不在此文件锁定。
+# RTX 5090 / Blackwell (sm_120) 需要与 CUDA wheel 对应的 torch。
+# 由用户根据当前 CUDA / 驱动版本显式安装：
+#   python -m pip install --index-url https://download.pytorch.org/whl/cu128 torch

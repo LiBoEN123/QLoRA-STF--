@@ -100,9 +100,15 @@ def _verify_split_membership(
     all_records: Sequence[Mapping[str, Any]],
     membership: Mapping[str, str],
 ) -> List[str]:
-    """校验 ``all.jsonl`` 中每个 sample_id 恰好存在于一个 split。
+    """校验 ``all.jsonl`` 与 split 互为子集，且互斥。
 
-    返回属于 split 的 sample 列表；任何缺失 / 重复都会抛 ``TokenizerAuditError``。
+    双向硬校验：
+
+    1. ``all.jsonl`` 中每个 ``sample_id`` 必须恰好存在于一个 split；
+    2. 每个 split 中的 ``sample_id`` 必须出现在 ``all.jsonl``。
+
+    任一方向缺失都会抛 ``TokenizerAuditError``，阻止 pipeline 继续。
+    返回属于 split 的 sample 列表。
     """
     seen: Dict[str, str] = {}
     for r in all_records:
@@ -115,6 +121,16 @@ def _verify_split_membership(
         if sid in seen and seen[sid] != split:
             raise TokenizerAuditError(f"sample_id {sid} 在 all.jsonl 出现多次")
         seen[sid] = split
+
+    # 反向校验：membership ⊆ all
+    missing_in_all = sorted(set(membership.keys()) - set(seen.keys()))
+    if missing_in_all:
+        # 仅展示前若干个 id，避免日志被刷爆
+        sample_ids = missing_in_all[:10]
+        raise TokenizerAuditError(
+            f"split 中存在 all.jsonl 没有的 sample_id（{len(missing_in_all)} 条，例如 {sample_ids}）"
+        )
+
     return [r for r in all_records]
 
 

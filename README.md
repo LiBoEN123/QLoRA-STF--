@@ -1,7 +1,7 @@
 # QLoRA SFT 党建知识微调项目
 
 > 7B/8B 量级（Qwen3-8B）+ QLoRA + SFT 领域大模型微调数据流水线。
-> 当前阶段：**Phase 4 — SFT Dataset Construction**。
+> 当前阶段：**Phase 5B — QLoRA Runtime Preflight + One-Step Smoke Training**。
 
 本仓库按阶段实现：
 
@@ -10,9 +10,10 @@
 3. **Phase 3 — Semantic Unit + FAQ + Chunking**：Semantic Unit 恢复 + FAQ 配对 + 结构感知 Chunking。
 4. **Phase 4 — SFT Dataset Construction**：把 FAQ SemanticUnit 转成标准 chat-style SFT messages，做数据质量审计与 Train/Val/Test 确定性划分。
 5. **Phase 5A — Qwen3 Tokenizer Validation**：通过 `AutoTokenizer.apply_chat_template` 对 SFT 数据做 token 长度、prompt prefix match、coverage、thinking marker 等审计，不加载模型权重、不初始化 GPU、不训练。
-6. **Phase 5B — QLoRA Training Preparation / Training**（后续）。
+6. **Phase 5B — QLoRA Runtime Preflight + One-Step Smoke Training**：在加载真实 8B 模型前复算 Phase 5A gate；在 GPU 上以 4-bit NF4 + LoRA r=16 + `assistant_only_loss=True` 跑 1 个 optimizer step，验证 forward / backward / save / reload / 推理最小链。
+7. **Phase 5C — Full QLoRA SFT Training**（后续）：真正的多 epoch / packing / checkpoint / evaluation。Phase 5B 不实现。
 
-> Phase 1 + Phase 2 + Phase 3 + Phase 4 + Phase 5A 已实现。Phase 4 仍然**不会**调用任何 LLM、不会加载 tokenizer、不会训练模型——只把 Phase 3 已经确认的可靠 FAQ 稳定、无损、可追溯地转换成标准 Chat-style SFT 数据集。Phase 5A 仅加载 `AutoTokenizer`（CPU），不下载 8B 模型权重，不引入 QLoRA / Trainer / LoRAConfig。
+> Phase 1 + Phase 2 + Phase 3 + Phase 4 + Phase 5A + Phase 5B 已实现。Phase 4 仍然**不会**调用任何 LLM、不会加载 tokenizer、不会训练模型——只把 Phase 3 已经确认的可靠 FAQ 稳定、无损、可追溯地转换成标准 Chat-style SFT 数据集。Phase 5A 仅加载 `AutoTokenizer`（CPU），不下载 8B 模型权重，不引入 QLoRA / Trainer / LoRAConfig。Phase 5B 在 GPU 上以 4-bit + LoRA 跑 1 个 optimizer step，**不**做完整 epoch 训练，不做超参搜索，不保存 merged 模型。
 > Phase 3 在历史迭代中曾为了恢复少量边界 FAQ 临时引入"Phase 3.5"的额外恢复流程，当前已合并回收——仅保留唯一的"一次检测 + 一次配对"主链。
 
 ---
@@ -494,7 +495,7 @@ tests/
 
 ### 后续阶段（暂不实现）
 
-- Phase 5B：QLoRA Training Preparation / Training。
+- Phase 5C：完整 epoch 训练、packing、checkpoint 调度、最终评测（Phase 5B 不实现）。
 
 ---
 
@@ -593,6 +594,107 @@ tests/
                               # RUN_QWEN_TOKENIZER_INTEGRATION=1
 ```
 
+---
+
+## Phase 5B — QLoRA Runtime Preflight + One-Step Smoke Training
+
+Phase 5B 是正式 QLoRA 训练前的最后一个工程验证阶段。**只跑 1 个 optimizer step**，目的是用真实 8B 模型证明：
+
+- Phase 5A token_report 数据未被破坏；
+- 当前 RTX 5090 / CUDA / PyTorch / bitsandbytes 环境可工作；
+- 4-bit NF4 + LoRA + `assistant_only_loss=True` 链路可完整执行 `forward → loss → backward → optimizer step`；
+- adapter 可 reload 并完成最小推理。
+
+**不**做完整 epoch 训练、**不**做超参搜索、**不**保存 merged 模型。
+
+### 数据流
+
+```text
+data/sft/train.jsonl
+data/sft/validation.jsonl
+data/tokenizer/token_report.json
+data/tokenizer/token_audit.jsonl
+        ↓
+Phase 5B QLoRA Smoke
+        ├── 复算 Phase 5A gate（不允许 max_tokens > 2048、membership 不一致、thinking marker 等）
+        ├── 检查 torch / transformers / trl / peft / accelerate / datasets / bitsandbytes
+        ├── 检查 CUDA availability + BF16 + Blackwell (sm_120)
+        ├── 真实 BF16 matmul 计算测试
+        ├── 加载 Qwen/Qwen3-8B（4-bit NF4 + double quant + bfloat16 compute）
+        ├── 验证 model.is_loaded_in_4bit / Linear4bit > 0
+        ├── prepare_model_for_kbit_training + LoRA r=16 alpha=32 all-linear
+        ├── 选 smoke 样本：sample_id 升序前 7 条 + train P95 附近 1 条（共 8 条）
+        ├── 构造 datasets.Dataset（messages-only）
+        ├── 检查 TRL assistant_only_loss=True 的 labels 同时含 -100 与非 -100 token（3 条）
+        ├── SFTTrainer.train(max_steps=1) — 必须 global_step == 1
+        ├── 保存 LoRA adapter
+        ├── 释放显存 + 重新 4-bit load + PeftModel.from_pretrained
+        ├── 最小推理验证（"什么是基层党组织？"）
+        ↓
+data/training/smoke_config.json
+data/training/smoke_report.json
+outputs/phase5b-smoke/adapter/
+logs/smoke_train_qlora.log
+```
+
+### 运行
+
+```bash
+# 1) 安装训练依赖（torch 单独按 CUDA wheel 安装）
+pip install -r requirements-train.txt
+
+# 2) 仅检查依赖 + GPU + BF16 + Blackwell（不下载 8B 模型）
+python scripts/check_training_env.py
+
+# 3) 运行 1-step smoke 训练（首次会下载 Qwen/Qwen3-8B 权重到 ~/.cache/huggingface）
+python scripts/smoke_train_qlora.py
+```
+
+### 配置（固定）
+
+| 维度 | 值 | 备注 |
+| --- | --- | --- |
+| 模型 | `Qwen/Qwen3-8B` | 与 Phase 5A 一致 |
+| 量化 | `load_in_4bit=True`, `nf4`, `double quant=True` | 固定 NF4，禁止 FP4 / INT8 / GPTQ / AWQ |
+| 计算 dtype | `bfloat16` | 禁止退回 fp16 |
+| max_length | `2048` | 与数据真实最大 1672 匹配，禁止自动降低 |
+| LoRA | `r=16, alpha=32, dropout=0.05, bias=none, all-linear` | Phase 5B 禁止超参搜索 |
+| per_device_train_batch_size | `1` | |
+| gradient_accumulation_steps | `1` | |
+| max_steps | `1` | smoke 限定，禁止多 step |
+| assistant_only_loss | `True` | TRL 内置 |
+| packing | `False` | Phase 5B 禁止 |
+| gradient_checkpointing | `True` | |
+| seed | `42` | |
+
+### 关键规则
+
+- **必须先过 Phase 5A gate**：`token_report.json` 的 membership / membership missing / assistant_only_loss_feasible / prompt_prefix_mismatch / zero_assistant_target / thinking markers / max ≤ 2048 任何一项不满足，立即停止。
+- **不重新生成 SFT 数据**：只读 `data/sft`、`data/tokenizer`；不修改 Phase 1~4 任何上游文件。
+- **不构造第二套 collator / labels**：依赖 TRL 当前版本的 `assistant_only_loss=True`；若 TRL 无法产生正确 mask，立即停止 `TRL_ASSISTANT_MASK_UNAVAILABLE`。
+- **不实现 model_factory / trainer_factory / quantization_manager**： 只有 1 个 `QLoRASmokeConfig` dataclass。
+- **不保存 merged 模型**：只保存 LoRA adapter；reload 后只做最小推理验证。
+- **不修改 Qwen3 chat template**：`enable_thinking=False` 由官方 tokenizer 处理；禁止手工 `replace("<think>", "")`。
+- **smoke_report.json 不要求 byte-deterministic**：GPU 显存 / loss / kernel 略有差异；`smoke_config.json` 必须 deterministic。
+- **类字段中文注释强制**：与 Phase 4 / 5A 同约定，新增 dataclass 每个字段必须有中文说明。
+
+### Phase 5B 模块结构
+
+```text
+src/data_pipeline/
+└── training/
+    ├── __init__.py
+    ├── models.py        # QLoRASmokeConfig（冻结）
+    └── pipeline.py      # evaluate_phase5a_gate / select_smoke_samples / load_token_*
+
+scripts /
+├── check_training_env.py    # 环境预检（CPU 即可，依赖检查 + GPU 信息）
+└── smoke_train_qlora.py     # 1-step 真实训练冒烟测试（GPU only）
+
+tests /
+└── test_training_pipeline.py
+```
+
 ### 后续阶段（暂不实现）
 
-- Phase 5B：QLoRA Training Preparation / Training（构造 `input_ids` / `labels` collator、加载 `AutoModelForCausalLM` + `BitsAndBytesConfig` + `LoRAConfig`、`SFTTrainer`、4-bit 训练循环等）。
+- Phase 5C：完整 QLoRA SFT 训练（多 epoch / packing / checkpoint / 评测）。Phase 5B 已验证链路即可推进。
