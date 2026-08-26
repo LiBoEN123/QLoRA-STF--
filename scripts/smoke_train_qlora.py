@@ -69,7 +69,7 @@ from data_pipeline.training.pipeline import (
 
 
 def _parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Phase 5B QLoRA 单步训练冒烟测试")
+    p = argparse.ArgumentParser(description="Phase 5B/5C-A QLoRA 单步训练冒烟测试")
     p.add_argument("--sft-dir", default="data/sft", type=Path)
     p.add_argument("--token-report", default="data/tokenizer/token_report.json", type=Path)
     p.add_argument("--token-audit", default="data/tokenizer/token_audit.jsonl", type=Path)
@@ -77,6 +77,9 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--adapter-dir", default="outputs/phase5b-smoke/adapter", type=Path)
     p.add_argument("--log-file", default="logs/smoke_train_qlora.log", type=Path)
     p.add_argument("--log-level", default="INFO")
+    # Phase 5C-A：新增 backend 选择；默认 hf 与 Phase 5B 完全等价。
+    p.add_argument("--backend", default="hf", choices=["hf", "unsloth"],
+                   help="Training backend：hf（Phase 5B baseline） 或 unsloth（Phase 5C-A 候选）")
     return p.parse_args()
 
 
@@ -791,5 +794,354 @@ def _gate_exit_code(reason: str) -> int:
     return 50
 
 
+# ---------------------------------------------------------------------------
+# Phase 5C-A — Unsloth backend 主流程
+# 与 HF main() 完全独立的代码路径；Phase 5B baseline（--backend hf）行为不受影响。
+# ---------------------------------------------------------------------------
+
+
+def main_unsloth() -> int:
+    """Phase 5C-A — Unsloth backend 单步 smoke。
+
+    与 HF 主流程的关键差异：
+
+    - 通过 ``data_pipeline.training.backends.UnslothBackend`` 加载模型；
+    - 不依赖现有 HF helpers（``_load_4bit_model`` 等），保持 HF 路径完全不变；
+    - 4-bit 验证仍走 ``is_loaded_in_4bit`` + ``Linear4bit`` 实际计数；
+    - assistant mask 仍走公开 TRL 路径 ``trainer.train_dataset`` + ``trainer.data_collator``。
+    """
+    args = _parse_args()
+    log = get_logger("smoke_train_qlora.unsloth")
+    args.log_file.parent.mkdir(parents=True, exist_ok=True)
+    handler = logging.FileHandler(args.log_file, encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    log.addHandler(handler)
+    log.setLevel(getattr(logging, args.log_level.upper(), logging.INFO))
+
+    config = QLoRASmokeConfig()
+    output_dir = args.output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+    adapter_dir = args.adapter_dir
+    adapter_dir.mkdir(parents=True, exist_ok=True)
+
+    final_report: Dict[str, Any] = {"status": "BLOCKED", "backend": "unsloth"}
+    library_versions: Dict[str, Optional[str]] = {}
+
+    try:
+        # ---- backend 解析 ----
+        from data_pipeline.training.backends import resolve_backend
+        backend = resolve_backend("unsloth")
+        meta = backend.metadata()
+        log.info("Backend metadata: %s", meta)
+
+        # ---- 1) Phase 5A gate（与 HF 完全相同） ----
+        token_report = load_token_report(args.token_report)
+        token_audit_rows = load_token_audit_rows(args.token_audit)
+        gate = evaluate_phase5a_gate_with_audit(token_report, token_audit_rows)
+        final_report["phase5a_gate"] = {
+            "passed": gate.passed,
+            "reasons": gate.reasons,
+            "report_max_tokens": gate.report_max_tokens,
+            "audit_max_tokens": gate.audit_max_tokens,
+            "actual_max_tokens": gate.actual_max_tokens,
+            "selected_max_length": gate.selected_max_length,
+            "samples_over_max_length": gate.samples_over_max_length,
+            "max_audit_over_total_tokens": gate.max_audit_over_total_tokens,
+        }
+        if not gate.passed:
+            raise TrainingGateError("PHASE5A_GATE_FAIL: " + "; ".join(gate.reasons))
+        if token_report.get("model", {}).get("model_name") != config.model_name:
+            raise TrainingGateError(
+                f"PHASE5A_GATE_FAIL: model_name mismatch "
+                f"{token_report.get('model', {}).get('model_name')!r} != {config.model_name!r}"
+            )
+
+        # ---- 2) 依赖版本收集 ----
+        for dep in ("transformers", "trl", "peft", "accelerate", "datasets",
+                    "bitsandbytes", "unsloth", "unsloth_zoo"):
+            try:
+                library_versions[dep] = __import__(dep).__version__
+            except Exception:
+                library_versions[dep] = None
+        for dep in ("triton", "xformers"):
+            try:
+                m = __import__(dep)
+                library_versions[dep] = getattr(m, "__version__", None)
+            except Exception:
+                library_versions[dep] = None
+
+        # ---- 3) GPU 预检（与 HF 完全相同） ----
+        torch = _ensure_torch()
+        library_versions["torch"] = torch.__version__
+        gpu_info = _check_gpu(torch, log)
+        _bf16_matmul(torch)
+        final_report["library_versions"] = library_versions
+        final_report["environment"] = {
+            "torch": torch.__version__,
+            "torch_cuda_version": torch.version.cuda,
+            **gpu_info,
+        }
+
+        # ---- 4) 解析 model revision（不联网 fallback 走缓存 SHA） ----
+        requested_revision, resolved_revision, revision_pinned = backend.resolve_revision(
+            config.model_name, config.revision
+        )
+        load_revision = resolved_revision or requested_revision
+
+        # Phase 5C-A：离线环境 fallback 到已知缓存 SHA，避免 silent main。
+        if not resolved_revision:
+            cached_sha = _load_cached_revision(config.model_name)
+            if cached_sha:
+                log.warning("HF Hub 不可达；使用缓存中的 pinned revision %s", cached_sha)
+                load_revision = cached_sha
+                revision_pinned = True
+
+        # ---- 5) smoke 选样（与 HF 完全相同） ----
+        train_records = load_jsonl_records(args.sft_dir / "train.jsonl")
+        train_total_tokens = sorted(
+            int(r.get("total_tokens") or 0)
+            for r in token_audit_rows
+            if r.get("split") == "train"
+        )
+        if train_total_tokens:
+            p95_idx = max(0, min(len(train_total_tokens) - 1,
+                                  int(round(0.95 * (len(train_total_tokens) - 1)))))
+            target_train_p95 = float(train_total_tokens[p95_idx])
+        else:
+            target_train_p95 = None
+        selection = select_smoke_samples_strict(
+            train_records, token_audit_rows, config, target_train_p95=target_train_p95
+        )
+
+        model_revision_info = {
+            "requested_revision": requested_revision,
+            "resolved_revision": resolved_revision,
+            "load_revision": load_revision,
+            "revision_pinned": revision_pinned,
+        }
+        write_smoke_config(
+            config,
+            output_dir / "smoke_config.json",
+            logger=log,
+            model_revision=model_revision_info,
+            selection=selection,
+        )
+        final_report["model"] = {
+            "model_name": config.model_name,
+            **model_revision_info,
+        }
+        final_report["smoke_samples"] = {
+            "total_selected": len(selection.sample_ids),
+            "sample_ids": selection.sample_ids,
+            "short_count": selection.short_count,
+            "p95_sample_id": selection.p95_sample_id,
+            "p95_total_tokens": selection.p95_total_tokens,
+        }
+
+        # ---- 6) 加载 tokenizer + model（Unsloth backend） ----
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
+        mem_before = _gpu_mem_snapshot(torch)
+
+        model, tokenizer = backend.load_model_and_tokenizer(
+            model_name=config.model_name,
+            revision=load_revision,
+            torch=torch,
+            config=config,
+        )
+        torch.cuda.synchronize()
+        mem_after_4bit = _gpu_mem_snapshot(torch)
+
+        # ---- 7) 4-bit 验证（真实检查） ----
+        is_loaded_in_4bit = backend.is_loaded_in_4bit(model)
+        linear4bit_modules = backend.count_linear4bit(model)
+        final_report["quantization"] = {
+            "load_in_4bit": is_loaded_in_4bit,
+            "quant_type": config.quant_type,
+            "double_quant": config.double_quant,
+            "compute_dtype": config.compute_dtype,
+            "linear4bit_modules": linear4bit_modules,
+        }
+        if not is_loaded_in_4bit or linear4bit_modules <= 0:
+            raise TrainingGateError("MODEL_NOT_ACTUALLY_4BIT")
+
+        # ---- 8) LoRA（Unsloth backend） ----
+        model = backend.apply_lora(model=model, config=config)
+        trainable_params, all_params = backend.count_trainable_params(model)
+        lora_layers = backend.count_lora_layers(model)
+        torch.cuda.synchronize()
+        mem_after_lora = _gpu_mem_snapshot(torch)
+        final_report["lora"] = {
+            "r": config.lora_r,
+            "alpha": config.lora_alpha,
+            "dropout": config.lora_dropout,
+            "bias": config.lora_bias,
+            "target_modules": config.lora_target_modules,
+            "task_type": config.lora_task_type,
+            "lora_layers": lora_layers,
+            "trainable_params": trainable_params,
+            "all_params": all_params,
+            "trainable_percentage": round(trainable_params / max(1, all_params) * 100, 4),
+        }
+        if trainable_params <= 0 or lora_layers <= 0:
+            raise TrainingGateError("LORA_NOT_APPLIED")
+        if final_report["lora"]["trainable_percentage"] > 95.0:
+            raise TrainingGateError("LORA_TOO_BROAD")
+
+        # ---- 9) dataset + trainer ----
+        dataset = _build_dataset(train_records, selection.sample_ids)
+        trainer = backend.build_trainer(
+            model=model,
+            tokenizer=tokenizer,
+            dataset=dataset,
+            config=config,
+            output_dir=output_dir,
+        )
+        torch.cuda.synchronize()
+        mem_after_trainer = _gpu_mem_snapshot(torch)
+
+        # ---- 10) assistant mask 公开路径校验 ----
+        mask_samples = _verify_assistant_mask(trainer, dataset)
+        final_report["assistant_mask"] = {
+            "checked_samples": len(mask_samples),
+            "samples": mask_samples,
+            "pass": all(s["mask_validation_pass"] for s in mask_samples),
+        }
+        if not final_report["assistant_mask"]["pass"]:
+            raise TrainingGateError("TRL_ASSISTANT_MASK_UNAVAILABLE: 监督 mask 未生效")
+
+        # ---- 11) 1 step train ----
+        train_output = trainer.train()
+        global_step = int(getattr(train_output, "global_step", 0))
+        train_loss = _extract_loss(train_output, trainer)
+        loss_finite = train_loss is not None and math.isfinite(train_loss) and train_loss != 0
+        grad_norm = _extract_grad_norm(trainer)
+        if global_step != 1:
+            raise TrainingGateError(f"GLOBAL_STEP 异常：{global_step} != 1")
+        if not loss_finite:
+            raise TrainingGateError(f"LOSS_INVALID: {train_loss}")
+        final_report["training"] = {
+            "max_length": config.max_length,
+            "max_steps": config.max_steps,
+            "global_step": global_step,
+            "loss": train_loss,
+            "loss_finite": bool(loss_finite),
+            "grad_norm": grad_norm,
+            "packing": config.packing,
+            "per_device_train_batch_size": config.per_device_train_batch_size,
+            "gradient_accumulation_steps": config.gradient_accumulation_steps,
+            "gradient_checkpointing": config.gradient_checkpointing,
+            "learning_rate": config.learning_rate,
+        }
+
+        mem_peak_alloc = int(torch.cuda.max_memory_allocated())
+        mem_peak_reserved = int(torch.cuda.max_memory_reserved())
+        final_report["memory"] = {
+            "before_model": mem_before,
+            "after_4bit_model": mem_after_4bit,
+            "after_lora": mem_after_lora,
+            "after_trainer": mem_after_trainer,
+            "peak_allocated_bytes": mem_peak_alloc,
+            "peak_reserved_bytes": mem_peak_reserved,
+            "peak_allocated_gib": _bytes_to_gib(mem_peak_alloc),
+            "peak_reserved_gib": _bytes_to_gib(mem_peak_reserved),
+        }
+
+        # ---- 12) save adapter ----
+        try:
+            adapter_files = backend.save_adapter(
+                trainer=trainer, tokenizer=tokenizer, adapter_dir=adapter_dir
+            )
+        except Exception as e:
+            raise TrainingGateError(f"ADAPTER_SAVE_FAIL: {e}") from e
+        final_report["adapter"] = {
+            "saved": True,
+            "path": str(adapter_dir),
+            "files": adapter_files,
+        }
+
+        # ---- 13) 释放 + reload + infer ----
+        del trainer
+        del model
+        gc.collect()
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
+        try:
+            infer = backend.reload_and_infer(
+                torch=torch,
+                model_name=config.model_name,
+                revision=load_revision,
+                config=config,
+                adapter_dir=adapter_dir,
+                inference_prompt=config.inference_prompt,
+                max_new_tokens=config.inference_max_new_tokens,
+            )
+        except Exception as e:
+            raise TrainingGateError(f"ADAPTER_RELOAD_OR_INFER_FAIL: {e}") from e
+        if infer["generated_token_count"] <= 0 or not infer["nonempty"]:
+            raise TrainingGateError(
+                f"INFERENCE_SMOKE_FAILED: {infer}"
+            )
+        final_report["inference_smoke"] = {
+            "pass": True,
+            "prompt": config.inference_prompt,
+            "generated_token_count": infer["generated_token_count"],
+            "generated_char_count": infer["generated_char_count"],
+            "generation_nonempty": infer["nonempty"],
+            "generation_preview": infer["generated_text"][:200],
+        }
+        log.info("Inference preview: %s", infer["generated_text"][:200])
+
+        final_report["status"] = "PASS"
+        return 0
+
+    except TrainingGateError as e:
+        final_report["status"] = "BLOCKED"
+        final_report["error"] = {"type": "TrainingGateError", "reason": str(e)}
+        log.error("BLOCKED: %s", e)
+        log.error(traceback.format_exc())
+        return _gate_exit_code(str(e))
+    except Exception as e:
+        final_report["status"] = "BLOCKED"
+        final_report["error"] = {
+            "type": type(e).__name__,
+            "reason": str(e),
+            "traceback": traceback.format_exc(),
+        }
+        log.error("BLOCKED: %s: %s", type(e).__name__, e)
+        log.error(traceback.format_exc())
+        return 50
+    finally:
+        atomic_write_json(output_dir / "smoke_report.json", final_report)
+
+
+def _load_cached_revision(model_name: str) -> Optional[str]:
+    """当 HuggingFace Hub 不可达时，从本地 HF cache 的 ``refs/main`` 读取 SHA。"""
+    try:
+        import os
+        from pathlib import Path
+        hf_home = Path(os.environ.get("HF_HOME") or Path.home() / ".cache" / "huggingface")
+        slug = "models--" + model_name.replace("/", "--")
+        refs_main = hf_home / "hub" / slug / "refs" / "main"
+        if refs_main.exists():
+            sha = refs_main.read_text(encoding="utf-8").strip()
+            if sha:
+                return sha
+    except Exception:
+        return None
+    return None
+
+
+def _cli_main() -> int:
+    args = _parse_args()
+    if (args.backend or "hf").lower() == "hf":
+        return main()
+    if args.backend == "unsloth":
+        return main_unsloth()
+    print(f"unknown backend: {args.backend}", file=sys.stderr)
+    return 50
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(_cli_main())
