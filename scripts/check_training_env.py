@@ -2,7 +2,9 @@
 
 仅做：
 
-- 依赖 + 版本检查（torch / trl / peft / accelerate / datasets / bitsandbytes）。
+- 依赖 + 版本检查（torch / transformers / trl / peft / accelerate /
+  datasets / bitsandbytes 共 7 项，缺一即 BLOCKED）。
+- ``python -m pip check``；冲突即 BLOCKED（DEPENDENCY_CONFLICT）。
 - CUDA availability + GPU 信息。
 - BF16 支持。
 - Blackwell (sm_120) 检查。
@@ -14,11 +16,12 @@
 退出码：
 
 - 0：所有检查通过
-- 2：依赖缺失
+- 2：依赖缺失（DEPENDENCY_MISSING）
 - 3：CUDA / GPU 不可用
 - 4：BF16 不支持
 - 5：Blackwell 不兼容
 - 6：CUDA 计算失败
+- 7：依赖冲突（DEPENDENCY_CONFLICT）
 """
 
 from __future__ import annotations
@@ -31,7 +34,7 @@ import platform
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -39,6 +42,18 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from data_pipeline.utils import get_logger
+
+
+# 必装依赖清单；缺一即 DEPENDENCY_MISSING，exit_code=2。
+REQUIRED_DEPENDENCIES: List[str] = [
+    "torch",
+    "transformers",
+    "trl",
+    "peft",
+    "accelerate",
+    "datasets",
+    "bitsandbytes",
+]
 
 
 def _parse_args() -> argparse.Namespace:
@@ -57,16 +72,10 @@ def _safe_version(module_name: str) -> str | None:
 
 
 def _gather_versions() -> Dict[str, str | None]:
-    return {
-        "python": platform.python_version(),
-        "torch": _safe_version("torch"),
-        "transformers": _safe_version("transformers"),
-        "trl": _safe_version("trl"),
-        "peft": _safe_version("peft"),
-        "accelerate": _safe_version("accelerate"),
-        "datasets": _safe_version("datasets"),
-        "bitsandbytes": _safe_version("bitsandbytes"),
-    }
+    out: Dict[str, str | None] = {"python": platform.python_version()}
+    for dep in REQUIRED_DEPENDENCIES:
+        out[dep] = _safe_version(dep)
+    return out
 
 
 def _torch_env() -> Dict[str, Any]:
@@ -150,17 +159,34 @@ def _summarize_blackwell(torch_info: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _missing_dependencies(versions: Dict[str, str | None]) -> List[str]:
+    return [dep for dep in REQUIRED_DEPENDENCIES if not versions.get(dep)]
+
+
 def _exit_code_from(report: Dict[str, Any]) -> int:
-    if not report["versions"].get("torch"):
+    """根据 report 字段统一计算 exit_code。"""
+    missing = _missing_dependencies(report["versions"])
+    if missing:
+        report.setdefault("reasons", []).append(
+            f"DEPENDENCY_MISSING: {missing}"
+        )
         return 2
+    if report["pip_check"]["returncode"] != 0:
+        report.setdefault("reasons", []).append("DEPENDENCY_CONFLICT")
+        return 7
     if not report["torch"]["cuda_available"]:
+        report.setdefault("reasons", []).append("CUDA_UNAVAILABLE")
         return 3
     if not report["torch"]["bf16_supported"]:
+        report.setdefault("reasons", []).append("BF16_UNSUPPORTED")
         return 4
     if report["blackwell"]["sm_120_supported"] is False:
+        report.setdefault("reasons", []).append("BLACKWELL_INCOMPAT")
         return 5
     if not report["bf16_matmul"]["ok"]:
+        report.setdefault("reasons", []).append("BF16_MATMUL_FAIL")
         return 6
+    report.setdefault("reasons", []).append("PASS")
     return 0
 
 
@@ -184,13 +210,15 @@ def main() -> int:
     blackwell = _summarize_blackwell(torch_info)
     log.info("Blackwell: %s", blackwell)
 
-    report = {
+    report: Dict[str, Any] = {
         "versions": versions,
         "torch": torch_info,
         "blackwell": blackwell,
         "bf16_matmul": bf16_matmul,
         "pip_check": pip_check,
+        "missing_dependencies": _missing_dependencies(versions),
     }
+
     report["exit_code"] = _exit_code_from(report)
 
     print(json.dumps(report, ensure_ascii=False, indent=2))

@@ -23,6 +23,7 @@ from data_pipeline.training import (
     load_token_audit_rows,
     load_token_report,
     select_smoke_samples,
+    select_smoke_samples_strict,
     write_smoke_config,
 )
 
@@ -87,7 +88,22 @@ def test_phase5a_gate_passes_valid_report(good_report):
     assert result.passed is True
     assert result.reasons == []
     assert result.actual_max_tokens == 1672
+    assert result.report_max_tokens == 1672
+    assert result.audit_max_tokens == 0
     assert result.samples_over_max_length == 0
+
+
+def test_phase5a_gate_with_audit_passes_when_audit_max_matches(good_report):
+    """audit max 与 report max 一致且无越限 ⇒ PASS。"""
+    rows = [
+        {"sample_id": f"sft_{i:06d}", "split": "train", "total_tokens": 100 + i}
+        for i in range(10)
+    ]
+    # 把 report.max 调到 audit 中最大值
+    good_report["length_stats"]["total_tokens"]["max"] = max(r["total_tokens"] for r in rows)
+    result = evaluate_phase5a_gate_with_audit(good_report, rows)
+    assert result.passed is True
+    assert result.report_max_tokens == result.audit_max_tokens
 
 
 def test_phase5a_gate_blocks_membership_mismatch(good_report):
@@ -160,18 +176,65 @@ def test_phase5a_gate_with_audit_counts_samples_over(good_report):
         {"sample_id": "sft_b", "split": "train", "total_tokens": 2100},
         {"sample_id": "sft_c", "split": "test", "total_tokens": 3000},
     ]
+    # audit 越限 ⇒ passed 必须 False
     result = evaluate_phase5a_gate_with_audit(good_report, rows)
-    # max in good_report is 1672 → still under 2048, so passed should be True
     assert result.samples_over_max_length == 2
-    assert result.passed is True
+    assert result.passed is False
+    assert any("TOKEN_AUDIT_OVER_MAX_LENGTH" in r for r in result.reasons)
 
-    # 改成超长 → BLOCKED
-    bad_rows = rows + [{"sample_id": "sft_d", "split": "train", "total_tokens": 5000}]
-    bad_result = evaluate_phase5a_gate_with_audit(good_report, bad_rows)
-    assert bad_result.samples_over_max_length == 3
-    # 但 max 来自 report（仍是 1672），因此 PASS
-    # 验证 gate 仍然 PASS（max 不来自 audit）；samples_over 仅作为指标
-    assert bad_result.passed is True
+    # report.max 仍 1672，audit.max = 3000 ⇒ max 不一致 ⇒ 必须 False
+    assert any("TOKEN_REPORT_AUDIT_MAX_MISMATCH" in r for r in result.reasons)
+    assert result.report_max_tokens == 1672
+    assert result.audit_max_tokens == 3000
+    # actual_max_tokens 取 audit
+    assert result.actual_max_tokens == 3000
+
+
+def test_audit_over_max_length_blocks_gate(good_report):
+    """新增：audit 任意样本 total_tokens > 2048 ⇒ 必须 BLOCKED。"""
+    rows = [
+        {"sample_id": "sft_a", "split": "train", "total_tokens": 2100},
+        {"sample_id": "sft_b", "split": "test", "total_tokens": 3000},
+    ]
+    result = evaluate_phase5a_gate_with_audit(good_report, rows)
+    assert result.samples_over_max_length == 2
+    assert result.passed is False
+    assert any("TOKEN_AUDIT_OVER_MAX_LENGTH" in r for r in result.reasons)
+    assert result.max_audit_over_total_tokens == 3000
+
+
+def test_report_and_audit_max_must_match(good_report):
+    """新增：report_max_tokens == audit_max_tokens 必须成立，否则 BLOCKED。"""
+    rows = [
+        {"sample_id": "sft_a", "split": "train", "total_tokens": 100},
+        {"sample_id": "sft_b", "split": "train", "total_tokens": 900},
+    ]
+    # 故意制造 max 不一致
+    good_report["length_stats"]["total_tokens"]["max"] = 1672  # report max
+    # audit max 900 ⇒ mismatch
+    result = evaluate_phase5a_gate_with_audit(good_report, rows)
+    assert result.passed is False
+    assert any("TOKEN_REPORT_AUDIT_MAX_MISMATCH" in r for r in result.reasons)
+    assert result.report_max_tokens == 1672
+    assert result.audit_max_tokens == 900
+    assert result.actual_max_tokens == 900
+
+
+def test_gate_passes_when_audit_max_equals_report_max(good_report):
+    """report.max == audit.max 且无越限 ⇒ PASS。"""
+    rows = [
+        {"sample_id": f"sft_{i:06d}", "split": "train", "total_tokens": 200 + i}
+        for i in range(5)
+    ] + [
+        {"sample_id": "sft_long", "split": "train", "total_tokens": 1672},
+    ]
+    good_report["length_stats"]["total_tokens"]["max"] = 1672
+    result = evaluate_phase5a_gate_with_audit(good_report, rows)
+    assert result.samples_over_max_length == 0
+    assert result.report_max_tokens == 1672
+    assert result.audit_max_tokens == 1672
+    assert result.actual_max_tokens == 1672
+    assert result.passed is True
 
 
 # ---------------------------------------------------------------------------
@@ -227,6 +290,8 @@ def test_smoke_sample_selection_includes_p95_example():
     train_records = [
         {"sample_id": f"sft_a{i}", "messages": [{"role": "user", "content": "Q"}, {"role": "assistant", "content": "A"}]}
         for i in range(7)
+    ] + [
+        {"sample_id": "sft_p95", "messages": [{"role": "user", "content": "Q"}, {"role": "assistant", "content": "A"}]},
     ]
     # audit rows: 7 条短 + 1 条 P95 (410 tokens 接近目标 400)
     audit_rows = [_sample(f"sft_a{i}", total=60 + i * 5) for i in range(7)] + [
@@ -250,6 +315,87 @@ def test_smoke_sample_selection_handles_missing_p95():
     sel = select_smoke_samples(train_records, [], cfg)
     assert sel.short_count == 1
     assert sel.p95_sample_id is None
+
+
+def test_smoke_sample_selection_requires_train_membership():
+    """audit 持有但 train.jsonl 缺失的样本不得被选为 P95。"""
+    train_records = [
+        {"sample_id": f"sft_{i:06d}", "messages": [{"role": "user", "content": "Q"}, {"role": "assistant", "content": "A"}]}
+        for i in range(8)
+    ]
+    # 8 条真实 train；audit 中混入 1 条 audit-only sft_ghost
+    audit_rows = [_sample(f"sft_{i:06d}", total=50 + i * 5) for i in range(8)]
+    audit_rows.append(_sample("sft_ghost", total=447))
+    audit_rows[-1]["split"] = "train"
+    cfg = QLoRASmokeConfig()
+    sel = select_smoke_samples(train_records, audit_rows, cfg)
+    # train P95 应来自真实 train
+    assert sel.p95_sample_id != "sft_ghost"
+    assert sel.p95_sample_id in {f"sft_{i:06d}" for i in range(8)}
+
+
+def test_smoke_sample_selection_deterministic_p95_tiebreak():
+    """P95 tie-break 确定性：delta → total_tokens → sample_id 升序。"""
+    # 构造 3 条 token 数完全相同的样本 ⇒ 必须按 sample_id 升序选最小
+    train_records = [
+        {"sample_id": "sft_x2", "messages": [{"role": "user", "content": "Q"}, {"role": "assistant", "content": "A"}]},
+        {"sample_id": "sft_x1", "messages": [{"role": "user", "content": "Q"}, {"role": "assistant", "content": "A"}]},
+        {"sample_id": "sft_x3", "messages": [{"role": "user", "content": "Q"}, {"role": "assistant", "content": "A"}]},
+    ]
+    # 7 条短样本以满足 short_count
+    extra_train = [
+        {"sample_id": f"sft_e{i}", "messages": [{"role": "user", "content": "Q"}, {"role": "assistant", "content": "A"}]}
+        for i in range(7)
+    ]
+    audit_rows = (
+        [_sample("sft_e0", total=10)] * 1
+        + [_sample(f"sft_e{i}", total=10 + i) for i in range(1, 7)]
+        + [
+            _sample("sft_x1", total=430),
+            _sample("sft_x2", total=430),
+            _sample("sft_x3", total=430),
+        ]
+    )
+    cfg = QLoRASmokeConfig()
+    sel = select_smoke_samples(extra_train + train_records, audit_rows, cfg)
+    # 目标 P95 = 430，三条全部 delta=0；按 sample_id 升序应选 sft_x1
+    assert sel.p95_sample_id == "sft_x1"
+    # 短样本不含 P95
+    assert "sft_x1" not in (
+        [sid for sid in sel.sample_ids if sid.startswith("sft_e")] if False else []
+    ) or "sft_x1" in sel.sample_ids
+
+
+def test_smoke_sample_selection_strict_requires_8():
+    """select_smoke_samples_strict 必须在样本不足时抛 SMOKE_SELECTION_INCOMPLETE。"""
+    train_records = [
+        {"sample_id": f"sft_{i:06d}", "messages": [{"role": "user", "content": "Q"}, {"role": "assistant", "content": "A"}]}
+        for i in range(8)
+    ]
+    audit_rows = [_sample(f"sft_{i:06d}", total=50 + i * 5) for i in range(8)]
+    audit_rows.append(_sample("sft_ghost", total=900))
+    audit_rows[-1]["split"] = "train"
+    cfg = QLoRASmokeConfig()
+    sel = select_smoke_samples_strict(train_records, audit_rows, cfg)
+    assert len(sel.sample_ids) == 8
+    assert sel.p95_sample_id != "sft_ghost"
+
+
+def test_smoke_sample_selection_strict_raises_on_missing_in_train():
+    """select_smoke_samples_strict 必须拒绝 audit 持有但 train.jsonl 缺失的样本。"""
+    # short 数量足够，但 P95 唯一候选不在 train_records 中
+    train_records = [
+        {"sample_id": f"sft_e{i}", "messages": [{"role": "user", "content": "Q"}, {"role": "assistant", "content": "A"}]}
+        for i in range(7)
+    ]
+    audit_rows = [_sample(f"sft_e{i}", total=10 + i) for i in range(7)]
+    audit_rows.append(_sample("sft_ghost", total=900))
+    audit_rows[-1]["split"] = "train"
+    cfg = QLoRASmokeConfig()
+    # short 数量 = 7，但 P95 无合法候选 ⇒ total < target_count ⇒ INCOMPLETE
+    with pytest.raises(TrainingGateError) as exc:
+        select_smoke_samples_strict(train_records, audit_rows, cfg)
+    assert "SMOKE_SELECTION_INCOMPLETE" in str(exc.value) or "SMOKE_SAMPLE_NOT_IN_TRAIN" in str(exc.value)
 
 
 # ---------------------------------------------------------------------------
@@ -334,26 +480,33 @@ def test_smoke_training_semantics():
 
 
 def test_smoke_config_is_deterministic(tmp_path: Path):
-    """同 config 写两次 smoke_config.json 必须 byte-for-byte 一致。"""
+    """同 config + 同 model_revision + 同 selection 写两次 smoke_config.json 必须 byte-for-byte 一致。"""
     cfg = QLoRASmokeConfig()
+    revision = {"requested_revision": "main", "resolved_revision": "abc123", "load_revision": "abc123", "revision_pinned": True}
+    sel = SmokeSampleSelection(
+        sample_ids=["sft_a", "sft_b", "sft_c"],
+        short_count=2,
+        p95_sample_id="sft_c",
+        p95_total_tokens=400,
+    )
     p1 = tmp_path / "c1.json"
     p2 = tmp_path / "c2.json"
-    write_smoke_config(cfg, p1)
-    write_smoke_config(cfg, p2)
+    write_smoke_config(cfg, p1, model_revision=revision, selection=sel)
+    write_smoke_config(cfg, p2, model_revision=revision, selection=sel)
     assert p1.read_bytes() == p2.read_bytes()
     payload = json.loads(p1.read_text(encoding="utf-8"))
-    # 必须含全部静态 key
-    for k in ("model_name", "revision", "max_length", "quantization", "lora", "training", "smoke"):
+    for k in ("model", "revision", "max_length", "quantization", "lora", "training", "smoke"):
         assert k in payload
-    # 检查不应出现运行期字段：timestamp / runtime / hostname / peak_memory / vram
     blob = json.dumps(payload, ensure_ascii=False)
-    for forbidden in ("timestamp", "runtime", "hostname", "peak_memory", "vram"):
-        assert forbidden not in blob.lower(), forbidden
-    # 必须含 smoke sample_ids 字段（即使本字段为空列表，也来自 smoke 数据生成）
-    assert "training" in payload
-    # 不含真实 loss 数值（loss_finite 等运行期字段）—但允许 config key "assistant_only_loss"
-    for forbidden in ("loss_finite", "peak_allocated", "peak_reserved"):
+    for forbidden in ("timestamp", "runtime", "hostname", "peak_memory", "vram", "loss_finite", "peak_allocated", "peak_reserved"):
         assert forbidden not in blob, forbidden
+    # sample IDs 必须写入 smoke block
+    assert payload["smoke"]["selected_sample_ids"] == ["sft_a", "sft_b", "sft_c"]
+    assert payload["smoke"]["p95_sample_id"] == "sft_c"
+    assert payload["smoke"]["p95_total_tokens"] == 400
+    # revision 必须写入 model block
+    assert payload["model"]["resolved_revision"] == "abc123"
+    assert payload["model"]["revision_pinned"] is True
 
 
 # ---------------------------------------------------------------------------

@@ -22,6 +22,7 @@ from .pipeline import (
     load_token_audit_rows,
     load_token_report,
     select_smoke_samples,
+    select_smoke_samples_strict,
     write_smoke_config,
 )
 
@@ -36,5 +37,6 @@ __all__ = [
     "load_token_audit_rows",
     "load_token_report",
     "select_smoke_samples",
+    "select_smoke_samples_strict",
     "write_smoke_config",
 ]

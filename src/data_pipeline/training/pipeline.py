@@ -31,7 +31,7 @@ class TrainingGateError(RuntimeError):
 
 @dataclass(frozen=True)
 class Phase5AGateResult:
-    """``evaluate_phase5a_gate`` 的返回结果。"""
+    """``evaluate_phase5a_gate`` / ``evaluate_phase5a_gate_with_audit`` 的返回结果。"""
 
     # 总体是否通过
     passed: bool
@@ -39,14 +39,23 @@ class Phase5AGateResult:
     # 失败原因列表（人类可读）；全部为空表示通过
     reasons: List[str] = field(default_factory=list)
 
-    # token_report 中观察到的实际最大 token 数
+    # 最终认定的实际最大 token 数（默认来自 report，audit 一致时也来自 audit）
     actual_max_tokens: int = 0
+
+    # 报告本身记录的 max（length_stats.total_tokens.max）
+    report_max_tokens: int = 0
+
+    # token_audit.jsonl 中观察到的最大 total_tokens
+    audit_max_tokens: int = 0
 
     # 触发 100% 覆盖所需的 max_length（与 token_report.coverage_thresholds 一致）
     selected_max_length: int = 0
 
     # 超过 2048 的样本数；必须为 0
     samples_over_max_length: int = 0
+
+    # token_audit 中越限样本中最大的 total_tokens（reason 附带）
+    max_audit_over_total_tokens: int = 0
 
 
 @dataclass(frozen=True)
@@ -82,8 +91,8 @@ def evaluate_phase5a_gate(token_report: Mapping[str, Any]) -> Phase5AGateResult:
     9. ``length_stats.total_tokens.max <= 2048``
     10. ``model.model_name == "Qwen/Qwen3-8B"``
 
-    ``samples_over_max_length`` 不在 report 自身中复算，固定从调用方传入；
-    此函数默认报告实际最大值与 token_audit 中越限样本数。
+    本函数仅消费 ``token_report``；audit 行越限/不一致检查在
+    ``evaluate_phase5a_gate_with_audit`` 中处理。
     """
     reasons: List[str] = []
 
@@ -119,10 +128,10 @@ def evaluate_phase5a_gate(token_report: Mapping[str, Any]) -> Phase5AGateResult:
 
     length_stats = token_report.get("length_stats") or {}
     total_tokens = length_stats.get("total_tokens") or {}
-    actual_max = int(total_tokens.get("max") or 0)
-    if actual_max > PHASE5A_MAX_TOKEN_LIMIT:
+    report_max = int(total_tokens.get("max") or 0)
+    if report_max > PHASE5A_MAX_TOKEN_LIMIT:
         reasons.append(
-            f"length_stats.total_tokens.max={actual_max} > {PHASE5A_MAX_TOKEN_LIMIT}（数据与 SFT 集合已失同步）"
+            f"length_stats.total_tokens.max={report_max} > {PHASE5A_MAX_TOKEN_LIMIT}（数据与 SFT 集合已失同步）"
         )
 
     model = token_report.get("model") or {}
@@ -137,9 +146,12 @@ def evaluate_phase5a_gate(token_report: Mapping[str, Any]) -> Phase5AGateResult:
     return Phase5AGateResult(
         passed=not reasons,
         reasons=reasons,
-        actual_max_tokens=actual_max,
+        actual_max_tokens=report_max,
+        report_max_tokens=report_max,
+        audit_max_tokens=0,
         selected_max_length=selected_max_length,
         samples_over_max_length=0,
+        max_audit_over_total_tokens=0,
     )
 
 
@@ -147,17 +159,50 @@ def evaluate_phase5a_gate_with_audit(
     token_report: Mapping[str, Any],
     token_audit_rows: Sequence[Mapping[str, Any]],
 ) -> Phase5AGateResult:
-    """``evaluate_phase5a_gate`` 的扩展版：额外报告 ``samples_over_max_length``。"""
+    """``evaluate_phase5a_gate`` 的扩展版：额外做 audit 越限 / max 一致性硬校验。
+
+    新增硬门槛：
+
+    11. ``token_audit.jsonl`` 中 ``total_tokens > 2048`` 的样本数必须为 0；
+        否则 ``TOKEN_AUDIT_OVER_MAX_LENGTH`` 计入 reasons 且 ``passed=False``。
+    12. ``report_max_tokens == audit_max_tokens``；否则 ``TOKEN_REPORT_AUDIT_MAX_MISMATCH``
+        计入 reasons 且 ``passed=False``。
+    13. 最终 ``actual_max_tokens`` 取 ``audit_max_tokens``（与 token_audit 严格一致）。
+    """
     base = evaluate_phase5a_gate(token_report)
-    samples_over = sum(
-        1 for r in token_audit_rows if int(r.get("total_tokens") or 0) > PHASE5A_MAX_TOKEN_LIMIT
-    )
+    reasons: List[str] = list(base.reasons)
+
+    audit_total_tokens = [int(r.get("total_tokens") or 0) for r in token_audit_rows]
+    audit_max = max(audit_total_tokens) if audit_total_tokens else 0
+    over_rows = [
+        (int(r.get("total_tokens") or 0), str(r.get("sample_id") or ""))
+        for r in token_audit_rows
+        if int(r.get("total_tokens") or 0) > PHASE5A_MAX_TOKEN_LIMIT
+    ]
+    samples_over = len(over_rows)
+    max_over = max((t for t, _ in over_rows), default=0)
+
+    if samples_over > 0:
+        reasons.append(
+            f"TOKEN_AUDIT_OVER_MAX_LENGTH: samples_over_max_length={samples_over}, "
+            f"max_audit_total_tokens={max_over}"
+        )
+
+    if base.report_max_tokens != audit_max:
+        reasons.append(
+            "TOKEN_REPORT_AUDIT_MAX_MISMATCH: "
+            f"report_max_tokens={base.report_max_tokens} != audit_max_tokens={audit_max}"
+        )
+
     return Phase5AGateResult(
-        passed=base.passed,
-        reasons=base.reasons,
-        actual_max_tokens=base.actual_max_tokens,
+        passed=not reasons,
+        reasons=reasons,
+        actual_max_tokens=audit_max if audit_max > 0 else base.report_max_tokens,
+        report_max_tokens=base.report_max_tokens,
+        audit_max_tokens=audit_max,
         selected_max_length=base.selected_max_length,
         samples_over_max_length=samples_over,
+        max_audit_over_total_tokens=max_over,
     )
 
 
@@ -172,18 +217,28 @@ def select_smoke_samples(
 
     规则：
 
-    1. 按 ``sample_id`` 升序取前 ``smoke_short_count`` 条；
-    2. 从 ``token_audit_rows`` 中找 ``split == "train"`` 且 ``total_tokens``
-       最接近 ``train P95`` 的一条；
-    3. 去重、保持原顺序；总数不超过 ``smoke_target_count``。
-
-    ``token_audit_rows`` 与 ``train_records`` 可来自不同路径；本函数依赖
-    sample_id 关联，不依赖顺序。
+    1. 按 ``sample_id`` 升序取前 ``smoke_short_count`` 条；样本必须真实存在于
+       ``train_records``；
+    2. P95 候选必须同时满足：
+       - ``token_audit_rows`` 中 ``split == "train"``；
+       - ``sample_id`` 真实存在于 ``train_records``（不允许 audit 持有但
+         train.jsonl 缺失的样本）；
+    3. P95 tie-break 确定性：``delta`` 升序 → ``total_tokens`` 升序 →
+       ``sample_id`` 升序；
+    4. 最终总数必须严格等于 ``smoke_target_count``，否则由调用方在
+       ``select_smoke_samples_strict`` 中抛 ``SMOKE_SELECTION_INCOMPLETE``。
     """
     if config.smoke_short_count < 0:
         raise ValueError(f"smoke_short_count 必须 >= 0，得到 {config.smoke_short_count}")
     if config.smoke_target_count <= 0:
         raise ValueError(f"smoke_target_count 必须 > 0，得到 {config.smoke_target_count}")
+
+    # real train sample_id 集合
+    actual_train_ids: set[str] = {str(r["sample_id"]) for r in train_records if r.get("sample_id")}
+    audit_train_rows = [
+        r for r in token_audit_rows
+        if r.get("split") == "train" and r.get("sample_id") in actual_train_ids
+    ]
 
     # 1) 按 sample_id 升序的 train 样本
     sorted_train = sorted(
@@ -199,14 +254,10 @@ def select_smoke_samples(
         if len(short_ids) >= config.smoke_short_count:
             break
 
-    # 2) P95 附近：先尝试调用方提供的 target；否则用 train 自身中位数近似
+    # 2) P95 目标：优先使用调用方传入；否则用 train 自身 P95（按 sample_id 升序）
     p95_target = target_train_p95
     if p95_target is None:
-        train_totals = sorted(
-            int(r.get("total_tokens") or 0)
-            for r in token_audit_rows
-            if r.get("split") == "train"
-        )
+        train_totals = sorted(int(r.get("total_tokens") or 0) for r in audit_train_rows)
         if not train_totals:
             p95_target = 0.0
         else:
@@ -214,34 +265,31 @@ def select_smoke_samples(
             idx = max(0, min(n - 1, int(round(0.95 * (n - 1)))))
             p95_target = float(train_totals[idx])
 
+    # 3) P95 候选：仅在 audit_train_rows（已交集）中寻找
     p95_id: str | None = None
     p95_tokens: int = 0
+    best_delta = math.inf
+    best_total = math.inf
+    best_sid: str | None = None
     if p95_target and p95_target > 0:
-        best_delta = math.inf
-        for r in token_audit_rows:
-            if r.get("split") != "train":
-                continue
-            sid = r.get("sample_id")
-            if not sid or sid in short_ids:
-                continue
-            total = int(r.get("total_tokens") or 0)
-            if total <= 0:
-                continue
-            delta = abs(total - p95_target)
-            if delta < best_delta:
-                best_delta = delta
-                p95_id = sid
-                p95_tokens = total
+        candidates = sorted(
+            (
+                (str(r.get("sample_id")), int(r.get("total_tokens") or 0))
+                for r in audit_train_rows
+                if int(r.get("total_tokens") or 0) > 0
+                and str(r.get("sample_id")) not in short_ids
+            ),
+            key=lambda x: (abs(x[1] - p95_target), x[1], x[0]),
+        )
+        if candidates:
+            best_sid, best_total = candidates[0]
+            p95_id = best_sid
+            p95_tokens = best_total
 
-    # 3) 合并去重
+    # 4) 合并去重（确定性顺序）
     merged: List[str] = list(short_ids)
     if p95_id and p95_id not in merged:
         merged.append(p95_id)
-
-    # 若 short_ids 不足 short_count 但 train_records 也较少，最终仍可能少于 target_count；
-    # 这里不强制补齐，避免引入不确定样本。
-    if len(merged) > config.smoke_target_count:
-        merged = merged[: config.smoke_target_count]
 
     return SmokeSampleSelection(
         sample_ids=merged,
@@ -249,6 +297,43 @@ def select_smoke_samples(
         p95_sample_id=p95_id,
         p95_total_tokens=p95_tokens,
     )
+
+
+def select_smoke_samples_strict(
+    train_records: Sequence[Mapping[str, Any]],
+    token_audit_rows: Sequence[Mapping[str, Any]],
+    config: QLoRASmokeConfig,
+    *,
+    target_train_p95: float | None = None,
+) -> SmokeSampleSelection:
+    """``select_smoke_samples`` 的硬约束版：总数必须严格等于 ``smoke_target_count``。
+
+    任何不满足：
+    - 任何选中的 sample_id 不在 train.jsonl ⇒ ``SMOKE_SAMPLE_NOT_IN_TRAIN``；
+    - 数量不足 / 超出 ``smoke_target_count`` ⇒ ``SMOKE_SELECTION_INCOMPLETE``。
+    """
+    selection = select_smoke_samples(
+        train_records,
+        token_audit_rows,
+        config,
+        target_train_p95=target_train_p95,
+    )
+
+    actual_train_ids: set[str] = {str(r["sample_id"]) for r in train_records if r.get("sample_id")}
+    missing_in_train = [sid for sid in selection.sample_ids if sid not in actual_train_ids]
+    if missing_in_train:
+        raise TrainingGateError(
+            f"SMOKE_SAMPLE_NOT_IN_TRAIN: {len(missing_in_train)} 个 sample_id 不在 train.jsonl，"
+            f"前 5 个={missing_in_train[:5]}"
+        )
+
+    if len(selection.sample_ids) != config.smoke_target_count:
+        raise TrainingGateError(
+            "SMOKE_SELECTION_INCOMPLETE: "
+            f"len(sample_ids)={len(selection.sample_ids)} != smoke_target_count={config.smoke_target_count}"
+        )
+
+    return selection
 
 
 def build_inference_prompt(prompt: str) -> List[Dict[str, str]]:
@@ -283,14 +368,51 @@ def write_smoke_config(
     output_path: Path,
     *,
     logger: logging.Logger | None = None,
+    model_revision: Mapping[str, Any] | None = None,
+    selection: SmokeSampleSelection | None = None,
 ) -> None:
     """把 ``QLoRASmokeConfig`` 序列化为 ``smoke_config.json``。
 
-    输出不含 timestamp / VRAM / loss 等运行期数据；同 config ⇒ byte-for-byte 一致。
+    输出不含 timestamp / VRAM / loss 等运行期数据；同 config + 同 model_revision +
+    同 selection ⇒ byte-for-byte 一致。
+
+    可选参数：
+
+    - ``model_revision``：写入 ``model.requested_revision`` / ``model.resolved_revision`` /
+      ``model.load_revision`` / ``model.revision_pinned``；
+    - ``selection``：写入 ``smoke.selected_sample_ids`` / ``smoke.p95_sample_id`` /
+      ``smoke.p95_total_tokens``。
     """
     log = logger or get_logger("data_pipeline.training")
-    payload: Dict[str, Any] = {
+    model_block: Dict[str, Any] = {
         "model_name": config.model_name,
+        "requested_revision": None,
+        "resolved_revision": None,
+        "load_revision": None,
+        "revision_pinned": False,
+    }
+    if model_revision:
+        model_block["requested_revision"] = model_revision.get("requested_revision")
+        model_block["resolved_revision"] = model_revision.get("resolved_revision")
+        model_block["load_revision"] = model_revision.get("load_revision")
+        model_block["revision_pinned"] = bool(model_revision.get("revision_pinned"))
+
+    smoke_block: Dict[str, Any] = {
+        "short_count": config.smoke_short_count,
+        "target_count": config.smoke_target_count,
+        "inference_prompt": config.inference_prompt,
+        "inference_max_new_tokens": config.inference_max_new_tokens,
+        "selected_sample_ids": [],
+        "p95_sample_id": None,
+        "p95_total_tokens": 0,
+    }
+    if selection is not None:
+        smoke_block["selected_sample_ids"] = list(selection.sample_ids)
+        smoke_block["p95_sample_id"] = selection.p95_sample_id
+        smoke_block["p95_total_tokens"] = int(selection.p95_total_tokens)
+
+    payload: Dict[str, Any] = {
+        "model": model_block,
         "revision": config.revision,
         "max_length": config.max_length,
         "quantization": {
@@ -323,12 +445,7 @@ def write_smoke_config(
             "report_to": config.report_to,
             "seed": config.seed,
         },
-        "smoke": {
-            "short_count": config.smoke_short_count,
-            "target_count": config.smoke_target_count,
-            "inference_prompt": config.inference_prompt,
-            "inference_max_new_tokens": config.inference_max_new_tokens,
-        },
+        "smoke": smoke_block,
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
     from ..utils import atomic_write_json
