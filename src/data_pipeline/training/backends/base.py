@@ -111,9 +111,16 @@ class Backend:
         dataset: Any,
         config: Any,
         output_dir: Path,
+        eval_dataset: Any = None,
     ) -> Any:
         """构造 TRL SFTTrainer（或等价物）；必须支持 ``trainer.train_dataset`` +
         ``trainer.data_collator`` 的公开 mask 校验。
+
+        Parameters
+        ----------
+        eval_dataset:
+            Phase 5C-B 新增：可选 evaluation dataset。缺省 (``None``) 保持
+            Phase 5B / 5C-A 行为不变（不传 eval_dataset）。
         """
         raise NotImplementedError
 

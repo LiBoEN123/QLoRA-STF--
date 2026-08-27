@@ -184,15 +184,17 @@ class UnslothBackend(Backend):
         sig = inspect.signature(SFTConfig.__init__)
         params = sig.parameters
 
+        # Phase 5C-B：num_train_epochs 优先取 config.num_train_epochs；
+        # Phase 5B smoke 路径无该字段 ⇒ 默认 1000（workaround，避免 TRL 默认 3
+        # epoch 覆盖 max_steps）。
+        num_epochs = getattr(config, "num_train_epochs", 1000)
+
         kwargs: Dict[str, Any] = {
             "output_dir": str(output_dir),
             "per_device_train_batch_size": config.per_device_train_batch_size,
             "gradient_accumulation_steps": config.gradient_accumulation_steps,
-            "max_steps": config.max_steps,
-            # 显式设置 num_train_epochs，避免默认 3 epoch 覆盖 max_steps。
-            "num_train_epochs": 1000,
+            "num_train_epochs": num_epochs,
             "learning_rate": config.learning_rate,
-            "warmup_steps": config.warmup_steps,
             "logging_steps": config.logging_steps,
             "save_strategy": config.save_strategy,
             "eval_strategy": config.eval_strategy,
@@ -204,10 +206,44 @@ class UnslothBackend(Backend):
             "report_to": config.report_to,
             "seed": config.seed,
         }
+
+        # warmup 方式：Phase 5C-B 使用 ``warmup_ratio``；Phase 5B 用 ``warmup_steps``。
+        # 优先 warmup_ratio（TRL SFTConfig 同时接受 warmup_steps）。
+        if hasattr(config, "warmup_ratio"):
+            if "warmup_ratio" in params:
+                kwargs["warmup_ratio"] = config.warmup_ratio
+            elif "warmup_steps" in params:
+                # 把 ratio 转 steps 需要总步数；不预计算，让 TRL 内部处理（ratio 优先）。
+                pass
+        if hasattr(config, "warmup_steps"):
+            if "warmup_steps" in params and "warmup_ratio" not in kwargs:
+                kwargs["warmup_steps"] = config.warmup_steps
+
+        # Phase 5C-B 专属：weight_decay / max_grad_norm / scheduler / data_seed
+        for key, attr in (
+            ("weight_decay", "weight_decay"),
+            ("max_grad_norm", "max_grad_norm"),
+            ("lr_scheduler_type", "lr_scheduler_type"),
+            ("save_total_limit", "save_total_limit"),
+            ("load_best_model_at_end", "load_best_model_at_end"),
+            ("metric_for_best_model", "metric_for_best_model"),
+            ("greater_is_better", "greater_is_better"),
+        ):
+            if key in params and hasattr(config, attr):
+                kwargs[key] = getattr(config, attr)
+
+        # data_seed（独立于 seed）
+        if "data_seed" in params and hasattr(config, "data_seed"):
+            kwargs["data_seed"] = config.data_seed
+
         if "max_length" in params:
             kwargs["max_length"] = config.max_length
         elif "max_seq_length" in params:
             kwargs["max_seq_length"] = config.max_length
+
+        # max_steps：Phase 5B smoke 路径（max_steps=1）；Phase 5C-B 路径无该字段。
+        if hasattr(config, "max_steps"):
+            kwargs["max_steps"] = config.max_steps
 
         return SFTConfig(**kwargs)
 
@@ -219,34 +255,104 @@ class UnslothBackend(Backend):
         dataset: Any,
         config: Any,
         output_dir: Path,
+        eval_dataset: Any = None,
     ) -> Any:
         from trl import SFTTrainer  # type: ignore
 
         sft_config = self._build_sft_config(config, output_dir)
 
-        # Unsloth 包装的 SFTTrainer 在 _prepare_dataset 阶段硬性要求
-        # ``formatting_func``（per-row，调用 ``next(iter(dataset))``）或 dataset
-        # 已含 ``text`` 字段。
-        # 为保持与 Phase 5B HF 路径完全等价的语义（assistant_only_loss + 相同
-        # apply_chat_template），我们在 backend 层预先生成 ``text`` 字段：
-        # - 保留 ``messages`` 字段以满足 Phase 5B mask 校验；
-        # - 新增 ``text`` 字段供 Unsloth 直接使用；
-        # - 不修改 max_length / packing / assistant_only_loss / NF4 / LoRA。
-        def _add_text(row):
-            text = tokenizer.apply_chat_template(
-                row["messages"], tokenize=False, add_generation_prompt=False
-            )
-            return {"text": text}
+        # Phase 5C-B：assistant_only_loss=True 必须真正生效。
+        # Unsloth 的 _prepare_dataset 走 ``text`` 路径不会生成 assistant_masks；
+        # Qwen3 的 chat template **不包含** ``{% generation %}`` 关键字，
+        # ``return_assistant_tokens_mask=True`` 返回全 0 mask。
+        #
+        # 因此我们采用 prompt-only tokenization 对齐的策略：
+        # 1) tokenize(prompt with add_generation_prompt=True) → 得到 prompt token ids；
+        # 2) tokenize(full conversation) → 得到 full token ids（prompt_ids 是 full_ids 的前缀）；
+        # 3) labels = [-100] * len(prompt_ids) + full_ids[len(prompt_ids):]
+        #    ⇒ 只有 assistant 的 content + <|im_end|> + \n 被监督。
+        # 4) 同时返回 assistant_masks 字段供 collator / mask check 使用；
+        # 5) 删除 ``messages`` 列，避免 Unsloth 把它当 conversational 重新触发
+        #    apply_chat_template；
+        # 6) dataset_text_field 指向不存在的字段，强制 Unsloth 走 ``input_ids`` 分支。
+        #
+        # 这样 Unsloth 的 _prepare_dataset 走 ``DataCollatorForSeq2Seq`` 路径，
+        # labels 字段直接被采用；padding 时 pad_token_id 位置补 -100，监督 mask 不变。
+        if not config.assistant_only_loss:
+            # 兼容路径：仅添加 ``text`` 字段。
+            def _add_text(row):
+                text = tokenizer.apply_chat_template(
+                    row["messages"], tokenize=False, add_generation_prompt=False
+                )
+                return {"text": text}
 
-        if hasattr(dataset, "map"):
-            dataset = dataset.map(_add_text)
+            if hasattr(dataset, "map"):
+                dataset = dataset.map(_add_text)
 
-        trainer = SFTTrainer(
-            model=model,
-            args=sft_config,
-            train_dataset=dataset,
-            processing_class=tokenizer,
-        )
+            if eval_dataset is not None and hasattr(eval_dataset, "map"):
+                eval_dataset = eval_dataset.map(_add_text)
+        else:
+            def _tokenize_with_am(row):
+                msgs = row["messages"]
+                prompt_ids = tokenizer.apply_chat_template(
+                    msgs[:-1],
+                    tokenize=True,
+                    add_generation_prompt=True,
+                )
+                full_ids = tokenizer.apply_chat_template(
+                    msgs,
+                    tokenize=True,
+                    add_generation_prompt=False,
+                )
+                # Qwen3 的 tokenization 对齐：prompt_ids 是 full_ids 的前缀。
+                if not (len(prompt_ids) <= len(full_ids)
+                        and list(full_ids[:len(prompt_ids)]) == list(prompt_ids)):
+                    # Fallback：保守地全部 supervised（不应发生）。
+                    prompt_len = 0
+                else:
+                    prompt_len = len(prompt_ids)
+                am = [0] * prompt_len + [1] * (len(full_ids) - prompt_len)
+                labels = [-100] * prompt_len + list(full_ids[prompt_len:])
+                attn = [1] * len(full_ids)
+                return {
+                    "input_ids": list(full_ids),
+                    "attention_mask": attn,
+                    "assistant_masks": am,
+                    "labels": labels,
+                }
+
+            if hasattr(dataset, "map"):
+                # 保留 ``messages`` 字段使 dataset 仍是 conversational，
+                # 但同时存在 ``input_ids`` + ``labels`` 让 Unsloth 走 ``do_tokenize=False``
+                # + ``DataCollatorForSeq2Seq`` 路径（line 1204）。
+                keep_cols = {"sample_id", "messages"}
+                dataset = dataset.map(
+                    _tokenize_with_am,
+                    remove_columns=[c for c in dataset.column_names if c not in keep_cols],
+                )
+
+            if eval_dataset is not None and hasattr(eval_dataset, "map"):
+                keep_cols = {"sample_id", "messages"}
+                eval_dataset = eval_dataset.map(
+                    _tokenize_with_am,
+                    remove_columns=[c for c in eval_dataset.column_names if c not in keep_cols],
+                )
+
+            try:
+                sft_config.dataset_text_field = "__no_such_field__"
+            except Exception:
+                pass
+
+        trainer_kwargs: Dict[str, Any] = {
+            "model": model,
+            "args": sft_config,
+            "train_dataset": dataset,
+            "processing_class": tokenizer,
+        }
+        if eval_dataset is not None:
+            trainer_kwargs["eval_dataset"] = eval_dataset
+
+        trainer = SFTTrainer(**trainer_kwargs)
         return trainer
 
     # ------------------------------------------------------------------

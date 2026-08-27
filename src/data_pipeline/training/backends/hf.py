@@ -122,14 +122,14 @@ class HfBackend(Backend):
         sig = inspect.signature(SFTConfig.__init__)
         params = sig.parameters
 
+        num_epochs = getattr(config, "num_train_epochs", 1000)
+
         kwargs: Dict[str, Any] = {
             "output_dir": str(output_dir),
             "per_device_train_batch_size": config.per_device_train_batch_size,
             "gradient_accumulation_steps": config.gradient_accumulation_steps,
-            "max_steps": config.max_steps,
-            "num_train_epochs": 1000,
+            "num_train_epochs": num_epochs,
             "learning_rate": config.learning_rate,
-            "warmup_steps": config.warmup_steps,
             "logging_steps": config.logging_steps,
             "save_strategy": config.save_strategy,
             "eval_strategy": config.eval_strategy,
@@ -141,10 +141,36 @@ class HfBackend(Backend):
             "report_to": config.report_to,
             "seed": config.seed,
         }
+
+        if hasattr(config, "warmup_ratio"):
+            if "warmup_ratio" in params:
+                kwargs["warmup_ratio"] = config.warmup_ratio
+        if hasattr(config, "warmup_steps"):
+            if "warmup_steps" in params and "warmup_ratio" not in kwargs:
+                kwargs["warmup_steps"] = config.warmup_steps
+
+        for key, attr in (
+            ("weight_decay", "weight_decay"),
+            ("max_grad_norm", "max_grad_norm"),
+            ("lr_scheduler_type", "lr_scheduler_type"),
+            ("save_total_limit", "save_total_limit"),
+            ("load_best_model_at_end", "load_best_model_at_end"),
+            ("metric_for_best_model", "metric_for_best_model"),
+            ("greater_is_better", "greater_is_better"),
+        ):
+            if key in params and hasattr(config, attr):
+                kwargs[key] = getattr(config, attr)
+
+        if "data_seed" in params and hasattr(config, "data_seed"):
+            kwargs["data_seed"] = config.data_seed
+
         if "max_length" in params:
             kwargs["max_length"] = config.max_length
         elif "max_seq_length" in params:
             kwargs["max_seq_length"] = config.max_length
+
+        if hasattr(config, "max_steps"):
+            kwargs["max_steps"] = config.max_steps
 
         return SFTConfig(**kwargs)
 
@@ -156,16 +182,21 @@ class HfBackend(Backend):
         dataset: Any,
         config: Any,
         output_dir: Path,
+        eval_dataset: Any = None,
     ) -> Any:
         from trl import SFTTrainer  # type: ignore
 
         sft_config = self._build_sft_config(config, output_dir)
-        trainer = SFTTrainer(
-            model=model,
-            args=sft_config,
-            train_dataset=dataset,
-            processing_class=tokenizer,
-        )
+        trainer_kwargs: Dict[str, Any] = {
+            "model": model,
+            "args": sft_config,
+            "train_dataset": dataset,
+            "processing_class": tokenizer,
+        }
+        if eval_dataset is not None:
+            trainer_kwargs["eval_dataset"] = eval_dataset
+
+        trainer = SFTTrainer(**trainer_kwargs)
         return trainer
 
     # ------------------------------------------------------------------

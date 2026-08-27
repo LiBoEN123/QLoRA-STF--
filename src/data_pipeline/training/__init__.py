@@ -1,17 +1,28 @@
-"""Phase 5B — QLoRA 单步训练冒烟测试相关代码。
+"""Phase 5B/5C — 训练相关模块。
 
-当前阶段仅实现：
-
-- ``QLoRASmokeConfig``：训练/采样/超参静态配置。
-- ``evaluate_phase5a_gate``：基于已写出的 ``token_report.json`` 复算硬门槛。
-- ``select_smoke_samples``：从 ``train.jsonl`` 中确定性选 8 条 smoke 样本。
-- ``build_inference_prompt``：最小推理 prompt 构造。
-
-不引入：trainer factory / model factory / quantization manager / lora manager
-等抽象。Phase 5C 之前不扩展。
+Phase 5B：``QLoRASmokeConfig`` + ``evaluate_phase5a_gate`` + 选样 + 最小推理。
+Phase 5C-A：backend 抽象（``HfBackend`` / ``UnslothBackend``）。
+Phase 5C-B：正式 3 epoch QLoRA SFT 配置 + 数据指纹 + 训练辅助。
 """
 
 from .models import QLoRASmokeConfig
+from .phase5c_b import (
+    DEFAULT_MAX_LENGTH,
+    DEFAULT_MODEL_NAME,
+    DEFAULT_NUM_TRAIN_EPOCHS,
+    DEFAULT_PER_DEVICE_TRAIN_BATCH_SIZE,
+    DEFAULT_GRADIENT_ACCUMULATION_STEPS,
+    DEFAULT_REVISION,
+    DatasetFingerprint,
+    Phase5CBTrainConfig,
+    compute_dataset_fingerprint,
+    compute_sample_id_signature,
+    load_run_manifest,
+    qloRA_smoke_config_parity_check,
+    select_best_checkpoint,
+    verify_resume_manifest,
+    write_run_manifest,
+)
 from .pipeline import (
     Phase5AGateResult,
     SmokeSampleSelection,
@@ -27,6 +38,7 @@ from .pipeline import (
 )
 
 __all__ = [
+    # Phase 5B
     "QLoRASmokeConfig",
     "Phase5AGateResult",
     "SmokeSampleSelection",
@@ -39,4 +51,20 @@ __all__ = [
     "select_smoke_samples",
     "select_smoke_samples_strict",
     "write_smoke_config",
+    # Phase 5C-B
+    "Phase5CBTrainConfig",
+    "DatasetFingerprint",
+    "DEFAULT_MODEL_NAME",
+    "DEFAULT_REVISION",
+    "DEFAULT_MAX_LENGTH",
+    "DEFAULT_NUM_TRAIN_EPOCHS",
+    "DEFAULT_PER_DEVICE_TRAIN_BATCH_SIZE",
+    "DEFAULT_GRADIENT_ACCUMULATION_STEPS",
+    "compute_dataset_fingerprint",
+    "compute_sample_id_signature",
+    "select_best_checkpoint",
+    "verify_resume_manifest",
+    "write_run_manifest",
+    "load_run_manifest",
+    "qloRA_smoke_config_parity_check",
 ]
