@@ -87,7 +87,12 @@ from data_pipeline.training import (
     Phase5CBTrainConfig,
     QLoRASmokeConfig,
     TrainingGateError,
+    _bytes_to_gib,
     build_inference_prompt,
+    collect_memory_snapshot,
+    collect_peak_memory,
+    build_memory_field_legend,
+    build_memory_summary,
     compute_dataset_fingerprint,
     evaluate_phase5a_gate_with_audit,
     load_run_manifest,
@@ -104,7 +109,6 @@ from smoke_train_qlora import (
     _check_gpu,
     _bf16_matmul,
     _ensure_torch,
-    _bytes_to_gib,
 )
 
 
@@ -288,15 +292,26 @@ def _validate_test_set_untouched(
 # ---------------------------------------------------------------------------
 # GPU memory helpers
 # ---------------------------------------------------------------------------
+#
+# 显存统计口径在 Phase 5C-B 收口时统一通过
+# ``data_pipeline.training.phase5c_b.collect_memory_snapshot`` /
+# ``collect_peak_memory`` / ``build_memory_summary`` / ``build_memory_field_legend``
+# 暴露，禁止在这里重新实现一套逻辑。
+#
+# 关键口径：
+#
+# - ``peak_allocated_gib`` = ``torch.cuda.max_memory_allocated()`` —
+#   真正代表物理显存 tensor 占用峰值（判断 OOM 风险的唯一指标）。
+# - ``allocator_peak_reserved_gib`` = ``torch.cuda.max_memory_reserved()`` —
+#   CUDA caching allocator 保留字节数（virtual reservation /
+#   expandable segments / 池化复用，可能 > 设备物理显存）。
+# - ``device_total_gib`` = ``torch.cuda.mem_get_info()[1]`` —
+#   设备物理显存总量。
 
 
 def _mem_snapshot(torch: Any) -> Dict[str, int]:
-    return {
-        "allocated_bytes": int(torch.cuda.memory_allocated()),
-        "reserved_bytes": int(torch.cuda.memory_reserved()),
-        "free_bytes": int(torch.cuda.mem_get_info()[0]),
-        "total_bytes": int(torch.cuda.mem_get_info()[1]),
-    }
+    """采集 GPU 显存原始字段（瞬时值）。"""
+    return collect_memory_snapshot(torch)
 
 
 # ---------------------------------------------------------------------------
@@ -554,7 +569,9 @@ def _run_preflight(
     peak_alloc = int(torch.cuda.max_memory_allocated())
     peak_reserved = int(torch.cuda.max_memory_reserved())
     total_mem = int(torch.cuda.mem_get_info()[1])
-    peak_pct = peak_reserved / total_mem
+    # peak_alloc / total_mem 是真正代表物理显存使用率的指标；
+    # reserved / total 仅作为诊断参考，可能 > 1.0（虚拟保留 / expandable segments）。
+    peak_alloc_pct = peak_alloc / total_mem if total_mem else 0.0
 
     # cleanup before exit
     del trainer
@@ -570,13 +587,16 @@ def _run_preflight(
         "global_step": global_step,
         "loss_history": losses,
         "loss_finite": True,
+        # 主要显存指标：物理 tensor 占用峰值。
         "peak_allocated_bytes": peak_alloc,
         "peak_allocated_gib": _bytes_to_gib(peak_alloc),
-        "peak_reserved_bytes": peak_reserved,
-        "peak_reserved_gib": _bytes_to_gib(peak_reserved),
-        "peak_reserved_within_80pct": bool(peak_pct <= 0.80),
-        "total_memory_bytes": total_mem,
-        "vram_percentage": round(peak_pct * 100.0, 3),
+        # 诊断指标：CUDA caching allocator 保留字节数（可能 > 设备总显存）。
+        "allocator_peak_reserved_bytes": peak_reserved,
+        "allocator_peak_reserved_gib": _bytes_to_gib(peak_reserved),
+        "device_total_bytes": total_mem,
+        "device_total_gib": _bytes_to_gib(total_mem),
+        "peak_allocated_within_80pct": bool(peak_alloc_pct <= 0.80),
+        "vram_allocated_percentage": round(peak_alloc_pct * 100.0, 3),
         "runtime_seconds": round(runtime, 3),
         "linear4bit_modules": linear4bit,
         "lora_layers": lora_layers,
@@ -587,11 +607,17 @@ def _run_preflight(
             "after_4bit_model": mem_after_4bit,
             "after_lora": mem_after_lora,
             "after_trainer": mem_after_trainer,
+            # 物理 tensor 占用峰值（GiB / bytes）。
             "peak_allocated_bytes": peak_alloc,
-            "peak_reserved_bytes": peak_reserved,
             "peak_allocated_gib": _bytes_to_gib(peak_alloc),
-            "peak_reserved_gib": _bytes_to_gib(peak_reserved),
+            # CUDA caching allocator 保留字节数（GiB / bytes），可能 > 物理显存。
+            "allocator_peak_reserved_bytes": peak_reserved,
+            "allocator_peak_reserved_gib": _bytes_to_gib(peak_reserved),
+            # 设备物理显存总量。
+            "device_total_bytes": total_mem,
+            "device_total_gib": _bytes_to_gib(total_mem),
         },
+        "memory_field_legend": _build_memory_legend(total_mem),
         "assistant_mask": {
             "checked_samples": len(mask_samples),
             "pass": True,
@@ -1053,6 +1079,7 @@ def main() -> int:
 
         peak_alloc = int(torch.cuda.max_memory_allocated())
         peak_reserved = int(torch.cuda.max_memory_reserved())
+        device_total = int(torch.cuda.mem_get_info()[1])
 
         # ---- 20) Best checkpoint selection ----
         best_sel = select_best_checkpoint(eval_losses_only)
@@ -1067,10 +1094,14 @@ def main() -> int:
             "epochs_completed": config.num_train_epochs,
             "global_step": global_step,
             "runtime_seconds": round(runtime, 3),
+            # 物理 tensor 占用峰值（GiB / bytes）— 真正代表物理显存消耗。
             "peak_allocated_bytes": peak_alloc,
             "peak_allocated_gib": _bytes_to_gib(peak_alloc),
-            "peak_reserved_bytes": peak_reserved,
-            "peak_reserved_gib": _bytes_to_gib(peak_reserved),
+            # CUDA caching allocator 保留字节数（GiB / bytes）— 仅诊断。
+            "allocator_peak_reserved_bytes": peak_reserved,
+            "allocator_peak_reserved_gib": _bytes_to_gib(peak_reserved),
+            "device_total_bytes": device_total,
+            "device_total_gib": _bytes_to_gib(device_total),
             "first_train_loss": train_losses[0] if train_losses else None,
             "last_train_loss": train_losses[-1] if train_losses else None,
             "min_train_loss": min(train_losses) if train_losses else None,
@@ -1152,16 +1183,28 @@ def main() -> int:
         )
 
         # ---- 25) Memory summary ----
+        # 关键：peak_allocated_gib 是真正代表物理显存 tensor 占用峰值；
+        # allocator_peak_reserved_gib 是 CUDA caching allocator 保留字节数，
+        # 由于 PyTorch 2.11 native allocator 的 virtual reservation /
+        # expandable segments / 池化复用，reserved 可能 > device_total_gib，
+        # 这是合法的 allocator 行为，**不**代表物理显存被超额占用。
         final_report["memory"] = {
             "before_model": mem_before,
             "after_4bit_model": mem_after_4bit,
             "after_lora": mem_after_lora,
             "after_trainer": mem_after_trainer,
+            # 物理 tensor 占用峰值（GiB / bytes）— 判断 OOM 风险的真正指标。
             "training_peak_allocated_bytes": peak_alloc,
-            "training_peak_reserved_bytes": peak_reserved,
             "training_peak_allocated_gib": _bytes_to_gib(peak_alloc),
-            "training_peak_reserved_gib": _bytes_to_gib(peak_reserved),
+            # CUDA caching allocator 保留字节数（GiB / bytes）— 仅诊断。
+            # 可能超过设备物理显存：见 _build_memory_legend。
+            "training_allocator_peak_reserved_bytes": peak_reserved,
+            "training_allocator_peak_reserved_gib": _bytes_to_gib(peak_reserved),
+            # 设备物理显存总量。
+            "device_total_bytes": device_total,
+            "device_total_gib": _bytes_to_gib(device_total),
         }
+        final_report["memory_field_legend"] = _build_memory_legend(device_total)
 
         # ---- 26) READY_FOR_PHASE5D gate ----
         ready = (

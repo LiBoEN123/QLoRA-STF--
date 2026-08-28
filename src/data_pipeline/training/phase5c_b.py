@@ -51,6 +51,301 @@ from ..utils import atomic_write_json, get_logger, load_jsonl_records
 _LOG = get_logger("data_pipeline.training.phase5c_b")
 
 
+# ---------------------------------------------------------------------------
+# 显存统计口径（Phase 5C-B 收口）
+# ---------------------------------------------------------------------------
+#
+# Phase 5C-B 正式训练时观察到：
+#
+#     torch.cuda.max_memory_reserved() > torch.cuda.get_device_properties(0).total_memory
+#
+# 例如 RTX 5090 (32 GiB) 上 reserved = 35.408 GiB。
+# 这是 CUDA caching allocator 的合法行为：
+#
+# - PyTorch 2.11 native allocator 支持 ``expandable_segments``：保留虚拟地址
+#   段，按需提交物理页；
+# - allocator 池化复用 + virtual reservation 让 ``memory_reserved()`` 报回
+#   "已向驱动保留的字节数"，可能高于设备物理显存；
+# - ``memory_allocated()`` 才是真正反映 tensor 占用的物理字节数。
+#
+# 因此 Phase 5C-B 收口：
+#
+# 1) 报告必须保留 ``peak_allocated_gib`` 作为唯一代表物理显存 tensor 占用
+#    峰值的指标（判断 OOM 风险）。
+# 2) ``peak_reserved_gib`` 改名为 ``allocator_peak_reserved_gib``，
+#    明确这是 allocator 保留字节数，**NOT equivalent to physical VRAM
+#    consumption**。
+# 3) ``device_total_gib`` 单独记录设备物理显存总量。
+# 4) ``memory_field_legend`` 写入 report 解释每个字段含义。
+
+_BYTES_PER_GIB = 1024 ** 3
+
+
+def _bytes_to_gib(n: int) -> float:
+    """bytes → GiB，保留 3 位小数。"""
+    return round(int(n) / _BYTES_PER_GIB, 3)
+
+
+def collect_memory_snapshot(torch: Any) -> Dict[str, int]:
+    """采集 GPU 显存原始字段（与 ``torch.cuda`` 1:1 对应，无换算误差）。
+
+    返回字段（bytes）：
+
+    - ``allocated_bytes`` = ``torch.cuda.memory_allocated()`` — 真实 tensor 占用。
+    - ``reserved_bytes`` = ``torch.cuda.memory_reserved()`` — allocator 保留。
+    - ``free_bytes`` / ``total_bytes`` = ``torch.cuda.mem_get_info()``。
+
+    禁止把这些字段当作"物理 VRAM 峰值"直接报告，除非额外注明口径。
+    """
+    return {
+        "allocated_bytes": int(torch.cuda.memory_allocated()),
+        "reserved_bytes": int(torch.cuda.memory_reserved()),
+        "free_bytes": int(torch.cuda.mem_get_info()[0]),
+        "total_bytes": int(torch.cuda.mem_get_info()[1]),
+    }
+
+
+def collect_peak_memory(torch: Any) -> Dict[str, int]:
+    """采集 GPU 显存峰值（bytes），reset 之后用。
+
+    返回字段：
+
+    - ``peak_allocated_bytes`` = ``torch.cuda.max_memory_allocated()``
+      — 真正代表物理显存 tensor 占用峰值。
+    - ``peak_reserved_bytes`` = ``torch.cuda.max_memory_reserved()``
+      — allocator 保留字节数，可能 > 设备物理显存。
+    - ``device_total_bytes`` = ``torch.cuda.mem_get_info()[1]``
+      — 设备物理显存总量。
+    """
+    return {
+        "peak_allocated_bytes": int(torch.cuda.max_memory_allocated()),
+        "peak_reserved_bytes": int(torch.cuda.max_memory_reserved()),
+        "device_total_bytes": int(torch.cuda.mem_get_info()[1]),
+    }
+
+
+def build_memory_summary(torch: Any) -> Dict[str, Any]:
+    """生成可写入 manifest / final report 的完整显存汇总。
+
+    包含：
+
+    - 物理 tensor 占用峰值（GiB / bytes）；
+    - CUDA caching allocator 保留字节数（GiB / bytes）；
+    - 设备物理显存总量（GiB / bytes）；
+    - ``memory_field_legend`` 解释每个字段含义；
+    - ``peak_allocated_within_80pct``：物理占用率 ≤ 80% 安全标记。
+
+    Returns
+    -------
+    dict
+        标准显存 summary 字段；可直接 ``atomic_write_json``。
+    """
+    peak = collect_peak_memory(torch)
+    total = int(peak["device_total_bytes"])
+    peak_alloc = int(peak["peak_allocated_bytes"])
+    peak_pct = peak_alloc / total if total else 0.0
+    return {
+        "peak_allocated_bytes": peak_alloc,
+        "peak_allocated_gib": _bytes_to_gib(peak_alloc),
+        "allocator_peak_reserved_bytes": int(peak["peak_reserved_bytes"]),
+        "allocator_peak_reserved_gib": _bytes_to_gib(int(peak["peak_reserved_bytes"])),
+        "device_total_bytes": total,
+        "device_total_gib": _bytes_to_gib(total),
+        "peak_allocated_within_80pct": bool(peak_pct <= 0.80),
+        "vram_allocated_percentage": round(peak_pct * 100.0, 3),
+        "memory_field_legend": {
+            "peak_allocated_gib": (
+                "torch.cuda.max_memory_allocated() — 真正代表物理显存 tensor "
+                "占用峰值。判断 OOM 风险的唯一指标。"
+            ),
+            "allocator_peak_reserved_gib": (
+                "torch.cuda.max_memory_reserved() — CUDA caching allocator 保留"
+                "字节数。可能超过设备物理显存（虚拟保留 / expandable segments /"
+                " 池化复用），NOT equivalent to physical VRAM consumption。"
+            ),
+            "device_total_gib": (
+                "torch.cuda.get_device_properties(0).total_memory — 设备物理 "
+                "显存总量（bytes → GiB）。"
+            ),
+            "reserved_exceeds_total_note": (
+                "如果 allocator_peak_reserved_gib > device_total_gib，这是合法 "
+                "的 allocator 行为，不代表物理显存被超额占用。判断 OOM 风险必须"
+                "以 peak_allocated_gib 为准。"
+            ),
+        },
+    }
+
+
+def build_memory_field_legend(device_total_bytes: int) -> Dict[str, str]:
+    """返回 ``memory_field_legend`` 字典，供 manifest / report 写入。
+
+    ``device_total_bytes`` 参数保留用于未来扩展（如按设备定制文案）。
+    """
+    _ = device_total_bytes
+    return {
+        "peak_allocated_gib": (
+            "torch.cuda.max_memory_allocated() — 真正代表物理显存 tensor "
+            "占用峰值。判断 OOM 风险的唯一指标。"
+        ),
+        "allocator_peak_reserved_gib": (
+            "torch.cuda.max_memory_reserved() — CUDA caching allocator 保留"
+            "字节数。可能超过设备物理显存（虚拟保留 / expandable segments /"
+            " 池化复用），NOT equivalent to physical VRAM consumption。"
+        ),
+        "device_total_gib": (
+            "torch.cuda.get_device_properties(0).total_memory — 设备物理 "
+            "显存总量（bytes → GiB）。"
+        ),
+        "reserved_exceeds_total_note": (
+            "如果 allocator_peak_reserved_gib > device_total_gib，这是合法 "
+            "的 allocator 行为，不代表物理显存被超额占用。判断 OOM 风险必须"
+            "以 peak_allocated_gib 为准。"
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Best adapter tensor signature
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class AdapterTensorSignature:
+    """LoRA adapter 权重文件的 tensor signature。
+
+    算法（按 tensor name 升序）：
+
+    1. 取每个 tensor 的 ``name`` / ``shape`` / ``dtype``；
+    2. 把 tensor 强制转成 ``torch.bfloat16`` contiguous 后取其 bytes
+       SHA256（避免 save format 不同时 dtype 差异导致的假性不匹配，例如
+       checkpoint 是 ``bfloat16`` 而 best_adapter 是 ``float32``）；
+    3. 拼接 ``name | shape | sha256(bytes)`` 升序排序后计算总 SHA256。
+
+    这样 ``best_adapter`` 与 ``checkpoint-288`` 的 ``adapter_model.safetensors``
+    只要数值上一致 ⇒ signature 一致；只要任一 tensor 数值改变 ⇒ signature 改变。
+    """
+
+    # adapter 文件路径（绝对或相对）
+    file_path: str
+    # tensor 总数（应当 = 252 LoRA layers × 2 = 504）
+    n_tensors: int
+    # 由 ``name | shape | sha256(bytes)`` 升序拼接计算的总 SHA256
+    signature: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "file_path": self.file_path,
+            "n_tensors": int(self.n_tensors),
+            "signature": self.signature,
+        }
+
+
+def _single_tensor_bytes_hash(tensor_bytes: bytes) -> str:
+    """单个 tensor 的 bytes SHA256。"""
+    h = hashlib.sha256()
+    h.update(tensor_bytes)
+    return h.hexdigest()
+
+
+def compute_adapter_signature(
+    safetensors_path: "Path",
+    *,
+    torch: Any = None,
+    prefer_dtype: str = "bfloat16",
+) -> AdapterTensorSignature:
+    """计算 ``adapter_model.safetensors`` 的 tensor signature。
+
+    Parameters
+    ----------
+    safetensors_path:
+        ``.safetensors`` 路径。
+    torch:
+        已 import 的 torch（必须传入；用于 tensor 转换）。如果为 None 自动 import。
+    prefer_dtype:
+        把所有 tensor 强转到该 dtype 后再算 SHA256。Phase 5C-B 固定
+        ``bfloat16``，避免 checkpoint (bf16) vs best_adapter (fp32) 的
+        save format 差异。
+
+    Returns
+    -------
+    AdapterTensorSignature
+    """
+    if torch is None:
+        import torch as _torch  # type: ignore
+        torch = _torch
+    path = Path(safetensors_path)
+    if not path.exists():
+        raise ValueError(f"adapter 文件不存在：{path}")
+    # 延迟 import safetensors；不强制依赖以免加载阶段报错。
+    from safetensors import safe_open  # type: ignore
+
+    if prefer_dtype == "bfloat16":
+        target_dtype = torch.bfloat16
+    elif prefer_dtype == "float32":
+        target_dtype = torch.float32
+    elif prefer_dtype == "float16":
+        target_dtype = torch.float16
+    else:
+        raise ValueError(f"prefer_dtype 必须为 bfloat16/float32/float16，得到 {prefer_dtype!r}")
+
+    rows: List[Tuple[str, Tuple[int, ...], str]] = []
+    with safe_open(str(path), framework="pt") as f:
+        keys = sorted(f.keys())
+        for k in keys:
+            t = f.get_tensor(k)
+            t_cast = t.to(target_dtype).contiguous()
+            raw = t_cast.view(torch.uint8).numpy().tobytes()
+            h_bytes = _single_tensor_bytes_hash(raw)
+            rows.append((k, tuple(t.shape), h_bytes))
+
+    outer = hashlib.sha256()
+    for name, shape, h_bytes in rows:
+        outer.update(name.encode("utf-8"))
+        outer.update(b"|")
+        outer.update(str(shape).encode("utf-8"))
+        outer.update(b"|")
+        outer.update(h_bytes.encode("utf-8"))
+        outer.update(b"\n")
+
+    return AdapterTensorSignature(
+        file_path=str(path),
+        n_tensors=len(rows),
+        signature=outer.hexdigest(),
+    )
+
+
+def verify_best_adapter_matches_checkpoint(
+    best_adapter_path: "Path",
+    checkpoint_path: "Path",
+    *,
+    torch: Any = None,
+    prefer_dtype: str = "bfloat16",
+) -> Dict[str, Any]:
+    """验证 ``best_adapter`` 是否数值上与 ``checkpoint_path`` 一致。
+
+    Returns
+    -------
+    dict
+        包含：
+
+        - ``best_signature`` / ``checkpoint_signature`` / ``n_tensors`` /
+          ``equal`` / ``value_match`` / ``best_adapter_path`` /
+          ``checkpoint_path`` / ``prefer_dtype``。
+    """
+    best_sig = compute_adapter_signature(best_adapter_path, torch=torch, prefer_dtype=prefer_dtype)
+    ckpt_sig = compute_adapter_signature(checkpoint_path, torch=torch, prefer_dtype=prefer_dtype)
+    return {
+        "best_adapter_path": str(best_adapter_path),
+        "checkpoint_path": str(checkpoint_path),
+        "best_signature": best_sig.to_dict(),
+        "checkpoint_signature": ckpt_sig.to_dict(),
+        "n_tensors": best_sig.n_tensors,
+        "equal": bool(best_sig.n_tensors == ckpt_sig.n_tensors and best_sig.signature == ckpt_sig.signature),
+        "value_match": bool(best_sig.signature == ckpt_sig.signature),
+        "prefer_dtype": prefer_dtype,
+    }
+
+
 # Phase 5C-B 正式训练配置默认值。禁止修改已验证 QLoRA 字段。
 DEFAULT_MODEL_NAME = "Qwen/Qwen3-8B"
 # 必须 pin 的 revision；与 Phase 5C-A 已加载 SHA 一致。
@@ -598,4 +893,14 @@ __all__ = [
     "write_run_manifest",
     "load_run_manifest",
     "qloRA_smoke_config_parity_check",
+    # Phase 5C-B 收口：显存统计口径
+    "collect_memory_snapshot",
+    "collect_peak_memory",
+    "build_memory_summary",
+    "build_memory_field_legend",
+    "_bytes_to_gib",
+    # Phase 5C-B 收口：best adapter signature
+    "AdapterTensorSignature",
+    "compute_adapter_signature",
+    "verify_best_adapter_matches_checkpoint",
 ]

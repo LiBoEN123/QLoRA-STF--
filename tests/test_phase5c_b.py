@@ -581,3 +581,258 @@ def test_inference_prompt_locked():
     cfg = Phase5CBTrainConfig()
     assert cfg.inference_prompt == "什么是基层党组织？"
     assert cfg.inference_max_new_tokens == 64
+
+
+# ---------------------------------------------------------------------------
+# 10) 显存统计口径（Phase 5C-B 收口）
+# ---------------------------------------------------------------------------
+
+
+def test_build_memory_field_legend_contains_required_keys():
+    """``build_memory_field_legend`` 必须解释每个关键字段。"""
+    from data_pipeline.training import build_memory_field_legend
+
+    legend = build_memory_field_legend(device_total_bytes=34190458880)
+    required_keys = {
+        "peak_allocated_gib",
+        "allocator_peak_reserved_gib",
+        "device_total_gib",
+        "reserved_exceeds_total_note",
+    }
+    assert required_keys <= set(legend.keys())
+    # 关键术语必须出现
+    assert "physical" in legend["peak_allocated_gib"].lower() or "物理" in legend["peak_allocated_gib"]
+    assert "not equivalent" in legend["allocator_peak_reserved_gib"].lower() or "NOT equivalent" in legend["allocator_peak_reserved_gib"]
+
+
+def test_bytes_to_gib():
+    """bytes → GiB 换算必须正确。"""
+    from data_pipeline.training import _bytes_to_gib
+
+    assert _bytes_to_gib(0) == 0.0
+    # 1 GiB
+    assert abs(_bytes_to_gib(1024 ** 3) - 1.0) < 1e-6
+    # 31.842 GiB ≈ 34190458880 bytes
+    assert abs(_bytes_to_gib(34190458880) - 31.842) < 0.01
+
+
+def test_collect_memory_snapshot_returns_raw_fields():
+    """``collect_memory_snapshot`` 必须返回与 torch.cuda 1:1 对应的字段名。"""
+    from data_pipeline.training import collect_memory_snapshot
+
+    class _FakeCuda:
+        @staticmethod
+        def memory_allocated():
+            return 1234
+
+        @staticmethod
+        def memory_reserved():
+            return 5678
+
+        @staticmethod
+        def mem_get_info():
+            return (9000, 16000)
+
+    class _FakeTorch:
+        cuda = _FakeCuda
+
+    snap = collect_memory_snapshot(_FakeTorch())
+    assert snap == {
+        "allocated_bytes": 1234,
+        "reserved_bytes": 5678,
+        "free_bytes": 9000,
+        "total_bytes": 16000,
+    }
+
+
+def test_collect_peak_memory_returns_raw_fields():
+    """``collect_peak_memory`` 必须返回三个原始字段。"""
+    from data_pipeline.training import collect_peak_memory
+
+    class _FakeCuda:
+        @staticmethod
+        def max_memory_allocated():
+            return 21050947584
+
+        @staticmethod
+        def max_memory_reserved():
+            return 38019268608
+
+        @staticmethod
+        def mem_get_info():
+            return (0, 34190458880)
+
+    class _FakeTorch:
+        cuda = _FakeCuda
+
+    snap = collect_peak_memory(_FakeTorch())
+    assert snap["peak_allocated_bytes"] == 21050947584
+    assert snap["peak_reserved_bytes"] == 38019268608
+    assert snap["device_total_bytes"] == 34190458880
+
+
+def test_build_memory_summary_separates_allocated_vs_reserved():
+    """``build_memory_summary`` 必须区分物理 allocated 与 allocator reserved。"""
+    from data_pipeline.training import build_memory_summary
+
+    class _FakeCuda:
+        @staticmethod
+        def max_memory_allocated():
+            return 21050947584  # 19.605 GiB
+
+        @staticmethod
+        def max_memory_reserved():
+            return 38019268608  # 35.408 GiB > device total
+
+        @staticmethod
+        def mem_get_info():
+            return (0, 34190458880)  # 31.842 GiB
+
+    class _FakeTorch:
+        cuda = _FakeCuda
+
+    summary = build_memory_summary(_FakeTorch())
+    assert summary["peak_allocated_gib"] == 19.605
+    assert summary["allocator_peak_reserved_gib"] == 35.408
+    assert summary["device_total_gib"] == 31.842
+    # reserved > total 是合法 allocator 行为
+    assert summary["allocator_peak_reserved_gib"] > summary["device_total_gib"]
+    assert summary["peak_allocated_gib"] < summary["device_total_gib"]
+    # legend 字段必须齐全
+    assert "memory_field_legend" in summary
+    # peak_allocated_within_80pct: 19.605 / 31.842 ≈ 0.616 < 0.80
+    assert summary["peak_allocated_within_80pct"] is True
+
+
+def test_memory_field_legend_explicitly_notes_oom_risk_metric():
+    """legend 必须明确指出 peak_allocated 才是 OOM 风险指标。"""
+    from data_pipeline.training import build_memory_field_legend
+
+    legend = build_memory_field_legend(34190458880)
+    # 必须显式说明 reserved ≠ 物理显存
+    assert "NOT equivalent" in legend["allocator_peak_reserved_gib"]
+    # 必须显式说明 allocated 才是 OOM 指标
+    assert "OOM" in legend["peak_allocated_gib"]
+
+
+# ---------------------------------------------------------------------------
+# 11) Best adapter tensor signature（Phase 5C-B 收口）
+# ---------------------------------------------------------------------------
+
+
+def _write_test_adapter(path: Path, *, dtype_a, dtype_b, seed_a=1, seed_b=2) -> None:
+    """写一个最小 adapter safetensors 用于测试。"""
+    from safetensors.torch import save_file  # type: ignore
+    import torch
+
+    torch.manual_seed(0)
+    a = (torch.randn(2, 3) * 0.1).to(dtype_a)
+    b = (torch.randn(4) * 0.1).to(dtype_b)
+    save_file({"layer.0.lora_A": a, "layer.0.lora_B": b}, str(path))
+
+
+def test_compute_adapter_signature_deterministic(tmp_path: Path):
+    """相同 adapter ⇒ 相同 signature。"""
+    import torch
+    from data_pipeline.training import compute_adapter_signature
+
+    p1 = tmp_path / "a.safetensors"
+    p2 = tmp_path / "b.safetensors"
+    _write_test_adapter(p1, dtype_a=torch.bfloat16, dtype_b=torch.float32)
+    _write_test_adapter(p2, dtype_a=torch.bfloat16, dtype_b=torch.float32)
+    s1 = compute_adapter_signature(p1, torch=torch)
+    s2 = compute_adapter_signature(p2, torch=torch)
+    assert s1.signature == s2.signature
+    assert s1.n_tensors == 2
+    assert s2.n_tensors == 2
+
+
+def test_compute_adapter_signature_dtype_invariant(tmp_path: Path):
+    """相同数值，不同保存 dtype（bf16 vs fp32）⇒ 同一 signature。"""
+    import torch
+    from data_pipeline.training import compute_adapter_signature
+
+    p_bf = tmp_path / "bf.safetensors"
+    p_fp = tmp_path / "fp.safetensors"
+    _write_test_adapter(p_bf, dtype_a=torch.bfloat16, dtype_b=torch.float32)
+    _write_test_adapter(p_fp, dtype_a=torch.float32, dtype_b=torch.float32)
+    s_bf = compute_adapter_signature(p_bf, torch=torch, prefer_dtype="bfloat16")
+    s_fp = compute_adapter_signature(p_fp, torch=torch, prefer_dtype="bfloat16")
+    assert s_bf.signature == s_fp.signature, (
+        "dtype-invariant signature 必须相同（cast 到 bfloat16 后值一致）"
+    )
+
+
+def test_compute_adapter_signature_changes_when_value_changes(tmp_path: Path):
+    """任何 tensor 数值改变 ⇒ signature 改变。"""
+    import torch
+    from data_pipeline.training import compute_adapter_signature
+    from safetensors.torch import save_file  # type: ignore
+
+    p1 = tmp_path / "a.safetensors"
+    p2 = tmp_path / "b.safetensors"
+    torch.manual_seed(0)
+    save_file({"x": torch.tensor([1.0, 2.0, 3.0]).to(torch.bfloat16)}, str(p1))
+    save_file({"x": torch.tensor([1.0, 2.0, 9.0]).to(torch.bfloat16)}, str(p2))
+    s1 = compute_adapter_signature(p1, torch=torch)
+    s2 = compute_adapter_signature(p2, torch=torch)
+    assert s1.signature != s2.signature
+
+
+def test_compute_adapter_signature_missing_file_raises(tmp_path: Path):
+    """adapter 文件不存在 ⇒ ValueError。"""
+    import torch
+    from data_pipeline.training import compute_adapter_signature
+
+    with pytest.raises(ValueError):
+        compute_adapter_signature(tmp_path / "missing.safetensors", torch=torch)
+
+
+def test_verify_best_adapter_matches_checkpoint_match(tmp_path: Path):
+    """相同数值 + 不同 dtype ⇒ verify 报告 ``equal=True``。"""
+    import torch
+    from data_pipeline.training import verify_best_adapter_matches_checkpoint
+
+    best = tmp_path / "best.safetensors"
+    ckpt = tmp_path / "ckpt.safetensors"
+    _write_test_adapter(best, dtype_a=torch.bfloat16, dtype_b=torch.float32)
+    _write_test_adapter(ckpt, dtype_a=torch.float32, dtype_b=torch.float32)
+    res = verify_best_adapter_matches_checkpoint(best, ckpt, torch=torch)
+    assert res["equal"] is True
+    assert res["value_match"] is True
+    assert res["n_tensors"] == 2
+
+
+def test_verify_best_adapter_matches_checkpoint_mismatch(tmp_path: Path):
+    """数值不一致 ⇒ ``equal=False``。"""
+    import torch
+    from data_pipeline.training import verify_best_adapter_matches_checkpoint
+    from safetensors.torch import save_file  # type: ignore
+
+    best = tmp_path / "best.safetensors"
+    ckpt = tmp_path / "ckpt.safetensors"
+    torch.manual_seed(0)
+    save_file({"x": torch.tensor([1.0, 2.0]).to(torch.bfloat16)}, str(best))
+    save_file({"x": torch.tensor([1.0, 9.0]).to(torch.bfloat16)}, str(ckpt))
+    res = verify_best_adapter_matches_checkpoint(best, ckpt, torch=torch)
+    assert res["equal"] is False
+    assert res["value_match"] is False
+
+
+# ---------------------------------------------------------------------------
+# 12) AdapterTensorSignature 序列化
+# ---------------------------------------------------------------------------
+
+
+def test_adapter_tensor_signature_to_dict():
+    """AdapterTensorSignature 必须可序列化为 dict。"""
+    from data_pipeline.training import AdapterTensorSignature
+
+    sig = AdapterTensorSignature(file_path="x.safetensors", n_tensors=504, signature="abc")
+    d = sig.to_dict()
+    assert d == {
+        "file_path": "x.safetensors",
+        "n_tensors": 504,
+        "signature": "abc",
+    }
+    assert sig.n_tensors == 504
