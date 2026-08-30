@@ -43,9 +43,10 @@ import json
 import logging
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Sequence
+from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
 from ..utils import atomic_write_json, get_logger, load_jsonl_records
+from .models import QLoRASmokeConfig
 
 
 _LOG = get_logger("data_pipeline.training.phase5c_b")
@@ -838,7 +839,7 @@ def load_run_manifest(path: Path) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def qloRA_smoke_config_parity_check(smoke: "QLoRASmokeConfigLike") -> List[str]:  # noqa: F821
+def qloRA_smoke_config_parity_check(smoke: QLoRASmokeConfig) -> List[str]:
     """验证 ``QLoRASmokeConfig`` 与 Phase 5C-B 固定超参一致（保留 Phase 5B 语义）。
 
     不可在 Phase 5C-B 引入的差异：

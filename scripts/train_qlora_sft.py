@@ -57,14 +57,12 @@ import gc
 import json
 import logging
 import math
-import os
-import shutil
 import subprocess
 import sys
 import time
 import traceback
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -77,30 +75,20 @@ if str(SCRIPTS) not in sys.path:
 from data_pipeline.utils import (
     atomic_write_json,
     atomic_write_jsonl,
-    calculate_file_sha256,
     get_logger,
     load_jsonl_records,
 )
 from data_pipeline.training import (
-    DEFAULT_MODEL_NAME,
-    DEFAULT_REVISION,
     Phase5CBTrainConfig,
-    QLoRASmokeConfig,
     TrainingGateError,
     _bytes_to_gib,
-    build_inference_prompt,
-    collect_memory_snapshot,
-    collect_peak_memory,
     build_memory_field_legend,
-    build_memory_summary,
+    collect_memory_snapshot,
     compute_dataset_fingerprint,
     evaluate_phase5a_gate_with_audit,
-    load_run_manifest,
     load_token_audit_rows,
     load_token_report,
-    qloRA_smoke_config_parity_check,
     select_best_checkpoint,
-    verify_resume_manifest,
     write_run_manifest,
 )
 from data_pipeline.training.backends import resolve_backend
@@ -617,7 +605,7 @@ def _run_preflight(
             "device_total_bytes": total_mem,
             "device_total_gib": _bytes_to_gib(total_mem),
         },
-        "memory_field_legend": _build_memory_legend(total_mem),
+        "memory_field_legend": build_memory_field_legend(total_mem),
         "assistant_mask": {
             "checked_samples": len(mask_samples),
             "pass": True,
@@ -1197,14 +1185,14 @@ def main() -> int:
             "training_peak_allocated_bytes": peak_alloc,
             "training_peak_allocated_gib": _bytes_to_gib(peak_alloc),
             # CUDA caching allocator 保留字节数（GiB / bytes）— 仅诊断。
-            # 可能超过设备物理显存：见 _build_memory_legend。
+            # 可能超过设备物理显存：见 build_memory_field_legend。
             "training_allocator_peak_reserved_bytes": peak_reserved,
             "training_allocator_peak_reserved_gib": _bytes_to_gib(peak_reserved),
             # 设备物理显存总量。
             "device_total_bytes": device_total,
             "device_total_gib": _bytes_to_gib(device_total),
         }
-        final_report["memory_field_legend"] = _build_memory_legend(device_total)
+        final_report["memory_field_legend"] = build_memory_field_legend(device_total)
 
         # ---- 26) READY_FOR_PHASE5D gate ----
         ready = (
