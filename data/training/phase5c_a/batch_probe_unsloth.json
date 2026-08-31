@@ -1,0 +1,73 @@
+{
+  "backend": "unsloth",
+  "reason": "batch=4 peak_reserved=20.83 GiB < 24 GiB；允许追加 batch=8 probe。",
+  "recommended_batch_size": 8,
+  "recommended_gradient_accumulation_steps": 1,
+  "results": [
+    {
+      "adapter_save": true,
+      "batch_size": 1,
+      "global_step": 3,
+      "loss": 1.6588384707768757,
+      "loss_finite": true,
+      "max_steps": 3,
+      "mean_step_seconds": 1.2313,
+      "oom": false,
+      "peak_allocated_bytes": 13731304960,
+      "peak_allocated_gib": 12.788,
+      "peak_reserved_bytes": 13767802880,
+      "peak_reserved_gib": 12.822,
+      "peak_reserved_within_80pct": true,
+      "runtime_seconds": 3.694
+    },
+    {
+      "adapter_save": true,
+      "batch_size": 2,
+      "global_step": 3,
+      "loss": 1.6890390714009602,
+      "loss_finite": true,
+      "max_steps": 3,
+      "mean_step_seconds": 2.1627,
+      "oom": false,
+      "peak_allocated_bytes": 12399939072,
+      "peak_allocated_gib": 11.548,
+      "peak_reserved_bytes": 13285457920,
+      "peak_reserved_gib": 12.373,
+      "peak_reserved_within_80pct": true,
+      "runtime_seconds": 6.488
+    },
+    {
+      "adapter_save": true,
+      "batch_size": 4,
+      "global_step": 3,
+      "loss": 1.494928240776062,
+      "loss_finite": true,
+      "max_steps": 3,
+      "mean_step_seconds": 3.8383,
+      "oom": false,
+      "peak_allocated_bytes": 16998631936,
+      "peak_allocated_gib": 15.831,
+      "peak_reserved_bytes": 22366126080,
+      "peak_reserved_gib": 20.83,
+      "peak_reserved_within_80pct": true,
+      "runtime_seconds": 11.515
+    },
+    {
+      "adapter_save": true,
+      "batch_size": 8,
+      "global_step": 3,
+      "loss": 1.4659531911214192,
+      "loss_finite": true,
+      "max_steps": 3,
+      "mean_step_seconds": 7.5097,
+      "oom": false,
+      "peak_allocated_bytes": 24936505856,
+      "peak_allocated_gib": 23.224,
+      "peak_reserved_bytes": 26904363008,
+      "peak_reserved_gib": 25.057,
+      "peak_reserved_within_80pct": true,
+      "runtime_seconds": 22.529
+    }
+  ],
+  "status": "PASS"
+}

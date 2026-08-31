@@ -1,0 +1,108 @@
+{
+  "backend": "unsloth",
+  "dataset": {
+    "train_count": 1149,
+    "train_sample_id_signature": "58ae3a429e1120413d58814c27c1ec7795f7d20afc73334ed69a25ff4c8e4bfc",
+    "train_schema": [
+      "messages",
+      "metadata",
+      "sample_id"
+    ],
+    "train_sha256": "b59927afe162bc9eef340386b01775ea8796032aeb5fda324652b15d6e1ae58c",
+    "validation_count": 75,
+    "validation_sample_id_signature": "56e4ac9398ff69ca22725eb8e292e23665d4d6cf5bae92abc76ede199d8a0740",
+    "validation_schema": [
+      "messages",
+      "metadata",
+      "sample_id"
+    ],
+    "validation_sha256": "61d29e321f4c8259870dddb50a8f99d914a87372233e90cdf96b8465d0dc64a4"
+  },
+  "effective_batch_size": 8,
+  "environment": {
+    "arch_list": [
+      "sm_75",
+      "sm_80",
+      "sm_86",
+      "sm_90",
+      "sm_100",
+      "sm_120"
+    ],
+    "bf16_supported": true,
+    "compute_capability": [
+      12,
+      0
+    ],
+    "cuda_available": true,
+    "device_count": 1,
+    "device_name": "NVIDIA GeForce RTX 5090",
+    "torch": "2.11.0+cu128",
+    "torch_cuda_version": "12.8",
+    "total_memory_bytes": 34190458880
+  },
+  "git": {
+    "branch": "main",
+    "commit": "de2195e8afc0c92606d8ec2adf313d31d60a5271",
+    "dirty": true
+  },
+  "library_versions": {
+    "accelerate": "1.14.0",
+    "bitsandbytes": "0.50.1",
+    "datasets": "4.3.0",
+    "peft": "0.20.0",
+    "torch": "2.11.0+cu128",
+    "torch_cuda_version": "12.8",
+    "transformers": "5.5.0",
+    "triton": "3.7.1",
+    "trl": "0.24.0",
+    "unsloth": "2026.8.21",
+    "unsloth_zoo": "2026.8.15",
+    "xformers": "0.0.35"
+  },
+  "lora": {
+    "alpha": 32,
+    "bias": "none",
+    "dropout": 0.05,
+    "r": 16,
+    "target_modules": "all-linear",
+    "task_type": "CAUSAL_LM"
+  },
+  "model": {
+    "load_revision": "b968826d9c46dd6066d109eabc6255188de91218",
+    "model_name": "Qwen/Qwen3-8B",
+    "requested_revision": "b968826d9c46dd6066d109eabc6255188de91218",
+    "resolved_revision": null,
+    "revision_pinned": true
+  },
+  "quantization": {
+    "compute_dtype": "bfloat16",
+    "double_quant": true,
+    "max_length": 2048,
+    "quant_type": "nf4"
+  },
+  "tokenizer_signature": "4ac4fed6d76f2cddf5ee756990b7bd4dc40655f96e4c6be460dc3299e73651c0",
+  "training": {
+    "assistant_only_loss": true,
+    "bf16": true,
+    "data_seed": 42,
+    "eval_strategy": "epoch",
+    "fp16": false,
+    "gradient_accumulation_steps": 1,
+    "gradient_checkpointing": true,
+    "greater_is_better": false,
+    "learning_rate": 0.0001,
+    "load_best_model_at_end": true,
+    "logging_steps": 5,
+    "lr_scheduler_type": "linear",
+    "max_grad_norm": 1.0,
+    "metric_for_best_model": "eval_loss",
+    "num_train_epochs": 3,
+    "packing": false,
+    "per_device_train_batch_size": 8,
+    "save_strategy": "epoch",
+    "save_total_limit": 2,
+    "seed": 42,
+    "warmup_ratio": 0.03,
+    "weight_decay": 0.0
+  }
+}

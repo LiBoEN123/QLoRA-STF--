@@ -1,0 +1,29 @@
+{
+  "BEST_ADAPTER_MATCHES_CHECKPOINT_288": true,
+  "backend": "unsloth",
+  "best_adapter_matches_checkpoint_288": true,
+  "best_adapter_path": "outputs\\phase5c-b\\best_adapter\\adapter_model.safetensors",
+  "best_signature": {
+    "file_path": "outputs\\phase5c-b\\best_adapter\\adapter_model.safetensors",
+    "n_tensors": 504,
+    "signature": "47b7005619f52ae7093c277cd46b1e3c98164f2131073debea2e7170547dc9be"
+  },
+  "checkpoint_path": "outputs\\phase5c-b\\checkpoints\\checkpoint-288\\adapter_model.safetensors",
+  "checkpoint_signature": {
+    "file_path": "outputs\\phase5c-b\\checkpoints\\checkpoint-288\\adapter_model.safetensors",
+    "n_tensors": 504,
+    "signature": "47b7005619f52ae7093c277cd46b1e3c98164f2131073debea2e7170547dc9be"
+  },
+  "cross_check": {
+    "expected_best_epoch_matches": true,
+    "manifest_best_epoch": 2,
+    "manifest_best_eval_loss": null,
+    "manifest_eval_loss_before_training": null
+  },
+  "equal": true,
+  "expected_best_epoch": 2,
+  "n_tensors": 504,
+  "prefer_dtype": "bfloat16",
+  "status": "PASS",
+  "value_match": true
+}

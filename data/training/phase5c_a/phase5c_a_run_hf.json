@@ -1,0 +1,190 @@
+{
+  "backend": "hf",
+  "batch_probe": {
+    "backend": "hf",
+    "reason": "batch=4 peak_reserved=15.912 GiB < 24 GiB；允许追加 batch=8 probe。",
+    "recommended_batch_size": 8,
+    "recommended_gradient_accumulation_steps": 1,
+    "results": [
+      {
+        "adapter_save": true,
+        "batch_size": 1,
+        "global_step": 3,
+        "loss": 1.5701996088027954,
+        "loss_finite": true,
+        "max_steps": 3,
+        "mean_step_seconds": 1.276,
+        "oom": false,
+        "peak_allocated_bytes": 11712523264,
+        "peak_allocated_gib": 10.908,
+        "peak_reserved_bytes": 12484345856,
+        "peak_reserved_gib": 11.627,
+        "peak_reserved_within_80pct": true,
+        "runtime_seconds": 3.828
+      },
+      {
+        "adapter_save": true,
+        "batch_size": 2,
+        "global_step": 3,
+        "loss": 1.6050365765889485,
+        "loss_finite": true,
+        "max_steps": 3,
+        "mean_step_seconds": 1.9783,
+        "oom": false,
+        "peak_allocated_bytes": 12786539520,
+        "peak_allocated_gib": 11.908,
+        "peak_reserved_bytes": 13126074368,
+        "peak_reserved_gib": 12.225,
+        "peak_reserved_within_80pct": true,
+        "runtime_seconds": 5.935
+      },
+      {
+        "adapter_save": true,
+        "batch_size": 4,
+        "global_step": 3,
+        "loss": 1.396560549736023,
+        "loss_finite": true,
+        "max_steps": 3,
+        "mean_step_seconds": 3.801,
+        "oom": false,
+        "peak_allocated_bytes": 16074580480,
+        "peak_allocated_gib": 14.971,
+        "peak_reserved_bytes": 17085497344,
+        "peak_reserved_gib": 15.912,
+        "peak_reserved_within_80pct": true,
+        "runtime_seconds": 11.403
+      },
+      {
+        "adapter_save": true,
+        "batch_size": 8,
+        "global_step": 3,
+        "loss": 1.3280182282129924,
+        "loss_finite": true,
+        "max_steps": 3,
+        "mean_step_seconds": 7.074,
+        "oom": false,
+        "peak_allocated_bytes": 23304443904,
+        "peak_allocated_gib": 21.704,
+        "peak_reserved_bytes": 25048383488,
+        "peak_reserved_gib": 23.328,
+        "peak_reserved_within_80pct": true,
+        "runtime_seconds": 21.222
+      }
+    ],
+    "status": "PASS"
+  },
+  "benchmark": {
+    "backend": "hf",
+    "error": null,
+    "extra": {
+      "adapter_files": [
+        "README.md",
+        "adapter_config.json",
+        "adapter_model.safetensors",
+        "chat_template.jinja",
+        "tokenizer.json",
+        "tokenizer_config.json"
+      ],
+      "assistant_mask": {
+        "checked_samples": 3,
+        "pass": true
+      },
+      "backend_metadata": {
+        "depends_on_unsloth": false,
+        "description": "Transformers + bitsandbytes + PEFT + TRL SFTTrainer (Phase 5B baseline)",
+        "name": "hf"
+      },
+      "final_loss": 1.1681015126407146,
+      "global_step": 20,
+      "inference_smoke": {
+        "generated_char_count": 112,
+        "generated_token_count": 64,
+        "nonempty": true,
+        "preview": "基层党组织是党的组织体系的根基，是党在社会基层组织中的战斗堡垒，是党的全部工作和战斗力的基础。基层党组织是党在社会基层单位中的战斗堡垒，是党的全部工作和战斗力的基础。基层党组织是党在社会基层单位中的战斗堡垒，是党的全部工作和"
+      },
+      "lora": {
+        "all_params": 4761498624,
+        "alpha": 32,
+        "bias": "none",
+        "dropout": 0.05,
+        "lora_layers": 252,
+        "r": 16,
+        "target_modules": "all-linear",
+        "task_type": "CAUSAL_LM",
+        "trainable_params": 43646976,
+        "trainable_percentage": 0.9167
+      },
+      "quantization": {
+        "compute_dtype": "bfloat16",
+        "double_quant": true,
+        "linear4bit_modules": 252,
+        "load_in_4bit": true,
+        "quant_type": "nf4"
+      }
+    },
+    "lora_apply_seconds": 0.881,
+    "loss_finite": true,
+    "loss_history": [],
+    "mean_step_seconds": 0.4939,
+    "median_step_seconds": 0.4939,
+    "model_load_seconds": 13.012,
+    "peak_allocated_gib": 10.353,
+    "peak_reserved_gib": 10.672,
+    "samples": 8,
+    "samples_per_sec": 0.8099,
+    "status": "PASS",
+    "supervised_tokens": 1671,
+    "supervised_tokens_per_sec": 169.1638,
+    "total_tokens": 1820,
+    "trainer_init_seconds": 1.253,
+    "training_runtime_seconds": 9.878
+  },
+  "environment": {
+    "arch_list": [
+      "sm_75",
+      "sm_80",
+      "sm_86",
+      "sm_90",
+      "sm_100",
+      "sm_120"
+    ],
+    "bf16_supported": true,
+    "compute_capability": [
+      12,
+      0
+    ],
+    "cuda_available": true,
+    "device_name": "NVIDIA GeForce RTX 5090",
+    "torch": "2.11.0+cu128",
+    "torch_cuda_version": "12.8",
+    "total_memory_bytes": 34190458880
+  },
+  "model": {
+    "load_revision": "b968826d9c46dd6066d109eabc6255188de91218",
+    "model_name": "Qwen/Qwen3-8B",
+    "requested_revision": "main",
+    "resolved_revision": null,
+    "revision_pinned": true
+  },
+  "phase5a_gate": {
+    "passed": true,
+    "reasons": []
+  },
+  "smoke_samples": {
+    "p95_sample_id": "sft_c7598ab5db13721eaf7cae67",
+    "p95_total_tokens": 447,
+    "sample_ids": [
+      "sft_009e3a966c0521a184ee9433",
+      "sft_00a670418931c192c0fd15ea",
+      "sft_0106d6646d6e008dbcbb8810",
+      "sft_01539ba7ba024a3db1298d68",
+      "sft_01634e59720f4d9db9986731",
+      "sft_017bb9fd88183148c9412ff5",
+      "sft_01edc24df45ff20100578c06",
+      "sft_c7598ab5db13721eaf7cae67"
+    ],
+    "short_count": 7,
+    "total_selected": 8
+  },
+  "status": "PASS"
+}

@@ -1,0 +1,26 @@
+{
+  "char_f1": {
+    "base_wins": 26,
+    "finetuned_wins": 53,
+    "mean_delta": 0.1051,
+    "n": 79,
+    "regression_rate": 0.3291,
+    "tie_rate": 0.0,
+    "ties": 0,
+    "tolerance": 1e-12,
+    "win_rate": 0.6709
+  },
+  "n": 79,
+  "rouge_l_f1": {
+    "base_wins": 18,
+    "finetuned_wins": 61,
+    "mean_delta": 0.1178,
+    "n": 79,
+    "regression_rate": 0.2278,
+    "tie_rate": 0.0,
+    "ties": 0,
+    "tolerance": 1e-12,
+    "win_rate": 0.7722
+  },
+  "tolerance": 1e-12
+}

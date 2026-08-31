@@ -1,0 +1,66 @@
+{
+  "backend": "hf",
+  "error": null,
+  "extra": {
+    "adapter_files": [
+      "README.md",
+      "adapter_config.json",
+      "adapter_model.safetensors",
+      "chat_template.jinja",
+      "tokenizer.json",
+      "tokenizer_config.json"
+    ],
+    "assistant_mask": {
+      "checked_samples": 3,
+      "pass": true
+    },
+    "backend_metadata": {
+      "depends_on_unsloth": false,
+      "description": "Transformers + bitsandbytes + PEFT + TRL SFTTrainer (Phase 5B baseline)",
+      "name": "hf"
+    },
+    "final_loss": 1.1681015126407146,
+    "global_step": 20,
+    "inference_smoke": {
+      "generated_char_count": 112,
+      "generated_token_count": 64,
+      "nonempty": true,
+      "preview": "基层党组织是党的组织体系的根基，是党在社会基层组织中的战斗堡垒，是党的全部工作和战斗力的基础。基层党组织是党在社会基层单位中的战斗堡垒，是党的全部工作和战斗力的基础。基层党组织是党在社会基层单位中的战斗堡垒，是党的全部工作和"
+    },
+    "lora": {
+      "all_params": 4761498624,
+      "alpha": 32,
+      "bias": "none",
+      "dropout": 0.05,
+      "lora_layers": 252,
+      "r": 16,
+      "target_modules": "all-linear",
+      "task_type": "CAUSAL_LM",
+      "trainable_params": 43646976,
+      "trainable_percentage": 0.9167
+    },
+    "quantization": {
+      "compute_dtype": "bfloat16",
+      "double_quant": true,
+      "linear4bit_modules": 252,
+      "load_in_4bit": true,
+      "quant_type": "nf4"
+    }
+  },
+  "lora_apply_seconds": 0.881,
+  "loss_finite": true,
+  "loss_history": [],
+  "mean_step_seconds": 0.4939,
+  "median_step_seconds": 0.4939,
+  "model_load_seconds": 13.012,
+  "peak_allocated_gib": 10.353,
+  "peak_reserved_gib": 10.672,
+  "samples": 8,
+  "samples_per_sec": 0.8099,
+  "status": "PASS",
+  "supervised_tokens": 1671,
+  "supervised_tokens_per_sec": 169.1638,
+  "total_tokens": 1820,
+  "trainer_init_seconds": 1.253,
+  "training_runtime_seconds": 9.878
+}

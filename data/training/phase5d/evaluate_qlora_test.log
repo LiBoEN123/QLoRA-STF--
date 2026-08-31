@@ -1,0 +1,75 @@
+2026-08-31 09:35:24,224 INFO [repo] HEAD=8f0118c7d4c84a645a6ddab227386ee5f6b0f5a0 dirty=True
+2026-08-31 09:35:24,229 INFO [adapter] computing tensor signature...
+2026-08-31 09:35:25,549 INFO [adapter] n_tensors=504 sig=47b7005619f52ae7
+2026-08-31 09:35:25,549 INFO [adapter] verifying best_adapter == checkpoint-288 ...
+2026-08-31 09:35:25,796 INFO [adapter] BEST_ADAPTER_MATCHES_CHECKPOINT_288 = TRUE (n_tensors=504)
+2026-08-31 09:36:17,185 INFO [tokenizer] loaded: Qwen2Tokenizer
+2026-08-31 09:36:17,208 INFO [generation] max_reference_assistant_tokens=1546, generation_max_new_tokens=1610
+2026-08-31 09:36:17,212 INFO [manifest] existing frozen manifest is consistent; reuse (sig=a7122ab5ebdb522c)
+2026-08-31 09:36:17,212 INFO [mask] sanity check on 3 test samples (first / middle / last by sample_id)
+2026-08-31 09:36:17,221 INFO [mask] sample_id=sft_01adf272326eb000d3500d38 seq_len=95 prompt_len=14 masked=14 supervised=81 prefix_equal=True
+2026-08-31 09:36:17,221 INFO [mask] sample_id=sft_6e90660fe98a92949268852e seq_len=134 prompt_len=18 masked=18 supervised=116 prefix_equal=True
+2026-08-31 09:36:17,223 INFO [mask] sample_id=sft_f974d1a86d81aadc47114101 seq_len=850 prompt_len=17 masked=17 supervised=833 prefix_equal=True
+2026-08-31 09:36:17,242 INFO [gpu] NVIDIA GeForce RTX 5090 total_gib=31.842
+2026-08-31 09:36:17,246 INFO [resume] loaded BASE=79 FINETUNED=79 existing predictions
+2026-08-31 09:36:17,246 INFO [base] loading BASE Qwen3-8B 4-bit...
+2026-08-31 09:36:23,153 INFO [repo] HEAD=8f0118c7d4c84a645a6ddab227386ee5f6b0f5a0 dirty=True
+2026-08-31 09:36:23,157 INFO [adapter] computing tensor signature...
+2026-08-31 09:36:24,467 INFO [adapter] n_tensors=504 sig=47b7005619f52ae7
+2026-08-31 09:36:24,468 INFO [adapter] verifying best_adapter == checkpoint-288 ...
+2026-08-31 09:36:24,722 INFO [adapter] BEST_ADAPTER_MATCHES_CHECKPOINT_288 = TRUE (n_tensors=504)
+2026-08-31 09:37:15,330 INFO [tokenizer] loaded: Qwen2Tokenizer
+2026-08-31 09:37:15,345 INFO [generation] max_reference_assistant_tokens=1546, generation_max_new_tokens=1610
+2026-08-31 09:37:15,345 INFO [manifest] existing frozen manifest is consistent; reuse (sig=a7122ab5ebdb522c)
+2026-08-31 09:37:15,345 INFO [mask] sanity check on 3 test samples (first / middle / last by sample_id)
+2026-08-31 09:37:15,361 INFO [mask] sample_id=sft_01adf272326eb000d3500d38 seq_len=95 prompt_len=14 masked=14 supervised=81 prefix_equal=True
+2026-08-31 09:37:15,362 INFO [mask] sample_id=sft_6e90660fe98a92949268852e seq_len=134 prompt_len=18 masked=18 supervised=116 prefix_equal=True
+2026-08-31 09:37:15,362 INFO [mask] sample_id=sft_f974d1a86d81aadc47114101 seq_len=850 prompt_len=17 masked=17 supervised=833 prefix_equal=True
+2026-08-31 09:37:15,381 INFO [gpu] NVIDIA GeForce RTX 5090 total_gib=31.842
+2026-08-31 09:37:15,384 INFO [resume] loaded BASE=79 FINETUNED=79 existing predictions
+2026-08-31 09:37:15,384 INFO [base] loading BASE Qwen3-8B 4-bit...
+2026-08-31 09:37:37,355 INFO [base] is_4bit=True linear4bit=252
+2026-08-31 09:37:37,357 INFO [base] computing teacher-forced assistant-only loss on 79 samples...
+2026-08-31 09:38:02,112 INFO [base] loss  loss=1.930304 ppl=6.891606 sup_tokens=14815 runtime=24.8s
+2026-08-31 09:38:02,112 INFO [base] generating 79/79...
+2026-08-31 09:38:02,291 INFO [base] released
+2026-08-31 09:38:02,291 INFO [finetuned] loading BASE + best_adapter...
+2026-08-31 09:38:20,929 INFO [finetuned] LoRA layers = 252
+2026-08-31 09:38:20,929 INFO [finetuned] computing teacher-forced assistant-only loss on 79 samples...
+2026-08-31 09:38:29,459 INFO [finetuned] loss  loss=1.224079 ppl=3.401033 sup_tokens=14815 runtime=8.5s
+2026-08-31 09:38:29,459 INFO [finetuned] generating 79/79...
+2026-08-31 09:38:37,583 INFO [finetuned] generation 1/79
+2026-08-31 09:38:56,100 INFO [finetuned] saved 5/79 to predictions
+2026-08-31 09:40:32,379 INFO [finetuned] saved 10/79 to predictions
+2026-08-31 09:40:32,379 INFO [finetuned] generation 10/79
+2026-08-31 09:44:20,686 INFO [finetuned] saved 15/79 to predictions
+2026-08-31 09:44:40,974 INFO [finetuned] saved 20/79 to predictions
+2026-08-31 09:44:40,975 INFO [finetuned] generation 20/79
+2026-08-31 09:46:09,444 INFO [finetuned] saved 25/79 to predictions
+2026-08-31 09:46:32,568 INFO [finetuned] saved 30/79 to predictions
+2026-08-31 09:46:32,568 INFO [finetuned] generation 30/79
+2026-08-31 09:46:59,358 INFO [finetuned] saved 35/79 to predictions
+2026-08-31 09:48:33,842 INFO [finetuned] saved 40/79 to predictions
+2026-08-31 09:48:33,842 INFO [finetuned] generation 40/79
+2026-08-31 09:48:55,664 INFO [finetuned] saved 45/79 to predictions
+2026-08-31 09:50:37,163 INFO [finetuned] saved 50/79 to predictions
+2026-08-31 09:50:37,163 INFO [finetuned] generation 50/79
+2026-08-31 09:52:03,208 INFO [finetuned] saved 55/79 to predictions
+2026-08-31 09:53:52,649 INFO [finetuned] saved 60/79 to predictions
+2026-08-31 09:53:52,649 INFO [finetuned] generation 60/79
+2026-08-31 09:54:23,266 INFO [finetuned] saved 65/79 to predictions
+2026-08-31 09:54:48,218 INFO [finetuned] saved 70/79 to predictions
+2026-08-31 09:54:48,218 INFO [finetuned] generation 70/79
+2026-08-31 09:55:02,042 INFO [finetuned] saved 75/79 to predictions
+2026-08-31 09:55:17,704 INFO [finetuned] saved 79/79 to predictions
+2026-08-31 09:55:17,704 INFO [finetuned] generation 79/79
+2026-08-31 09:55:17,924 INFO [finetuned] released
+2026-08-31 09:55:17,931 INFO ============================================================
+2026-08-31 09:55:17,931 INFO [result] PHASE5D_CODE = PASS
+2026-08-31 09:55:17,931 INFO [result] READY_FOR_PHASE5E = True
+2026-08-31 09:55:17,931 INFO [result] base_loss=1.930304 ft_loss=1.224079 improvement=0.706225 (36.586%)
+2026-08-31 09:55:17,931 INFO [result] base char_f1=0.2702 ft char_f1=0.3753
+2026-08-31 09:55:17,931 INFO [result] base rouge_l=0.1447 ft rouge_l=0.2626
+2026-08-31 09:55:17,931 INFO [result] paired cf1: ft_wins=53 base_wins=26 ties=0 tolerance=1e-12
+2026-08-31 09:55:17,931 INFO [result] paired rl: ft_wins=61 base_wins=18 ties=0 tolerance=1e-12
+2026-08-31 09:55:17,931 INFO ============================================================

@@ -1,0 +1,64 @@
+{
+  "accepted_samples": 1303,
+  "answer_length": {
+    "max": 2664,
+    "mean": 262.11,
+    "median": 179,
+    "min": 10,
+    "p95": 703
+  },
+  "confidence": {
+    "high": 1294,
+    "medium": 9
+  },
+  "conflicting_question_groups": 12,
+  "conflicting_samples": 24,
+  "duplicate_samples": 0,
+  "eligible_faq_units": 1327,
+  "filtered_by_confidence": 0,
+  "input_faq_units": 1327,
+  "input_units": 1400,
+  "leakage": {
+    "cross_split_exact_sample": 0,
+    "cross_split_question": 0
+  },
+  "messages": {
+    "empty_content": 0,
+    "invalid_role_order": 0
+  },
+  "min_confidence": "medium",
+  "question_length": {
+    "max": 159,
+    "mean": 22.37,
+    "median": 19,
+    "min": 5,
+    "p95": 44
+  },
+  "rejected_samples": 24,
+  "split_bucket_boundaries": {
+    "bucket_total": 10000,
+    "train_end": 9000,
+    "validation_end": 9500
+  },
+  "split_ratios_actual": {
+    "test": 0.0606,
+    "train": 0.8818,
+    "validation": 0.0576
+  },
+  "split_ratios_target": {
+    "test": 0.05,
+    "train": 0.9,
+    "validation": 0.05
+  },
+  "split_salt": "qlora-sft-phase4-v1",
+  "splits": {
+    "test": 79,
+    "train": 1149,
+    "validation": 75
+  },
+  "traceability": {
+    "unique_source_doc_ids": 5276,
+    "unique_source_paths": 1,
+    "unique_unit_ids": 1303
+  }
+}

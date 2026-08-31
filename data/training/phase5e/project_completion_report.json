@@ -1,0 +1,343 @@
+{
+  "adapter_provenance": {
+    "checkpoint_path": "outputs\\phase5c-b\\checkpoints\\checkpoint-288\\adapter_model.safetensors",
+    "checkpoint_signature": "47b7005619f52ae7093c277cd46b1e3c98164f2131073debea2e7170547dc9be",
+    "equal": true,
+    "error": null,
+    "n_tensors": 504,
+    "source_path": "outputs\\phase5c-b\\best_adapter\\adapter_model.safetensors",
+    "source_signature": "47b7005619f52ae7093c277cd46b1e3c98164f2131073debea2e7170547dc9be"
+  },
+  "code": "PASS",
+  "duration_seconds": 63.352,
+  "evaluation_summary": {
+    "base": {
+      "cap_hit_count": 0,
+      "empty_count": 0,
+      "empty_generation_rate": 0.0,
+      "max_token_hit_rate": 0.0,
+      "mean_char_f1": 0.2702,
+      "mean_exact_match": 0.0,
+      "mean_generated_tokens": 693.62,
+      "mean_rouge_l_f1": 0.1447,
+      "n": 79,
+      "test_loss": 1.9303041916661194,
+      "test_perplexity": 6.891606291964793
+    },
+    "eval_protocol_signature": null,
+    "finetuned": {
+      "cap_hit_count": 9,
+      "empty_count": 0,
+      "empty_generation_rate": 0.0,
+      "max_token_hit_rate": 0.1139,
+      "mean_char_f1": 0.3753,
+      "mean_exact_match": 0.0,
+      "mean_generated_tokens": 278.41,
+      "mean_rouge_l_f1": 0.2626,
+      "n": 79,
+      "test_loss": 1.2240790855394719,
+      "test_perplexity": 3.4010325800845704
+    },
+    "leakage_audit": {
+      "full_message_overlap_count": 0,
+      "is_clean": true,
+      "near_duplicate_count": 1,
+      "near_duplicate_top": [
+        {
+          "best_match_sample_id": "sft_fe2b86a13dca6aabbd14b09c",
+          "best_match_split": "train",
+          "similarity": 0.967,
+          "test_sample_id": "sft_d236a4e8717a81cc0173a247"
+        }
+      ],
+      "prompt_overlap_count": 0,
+      "sample_id_overlap_train": 0,
+      "sample_id_overlap_validation": 0
+    },
+    "loss_improvement": 0.7062251061266476,
+    "loss_improvement_pct": 36.58620797570137,
+    "paired_char_f1": {
+      "base_wins": 26,
+      "finetuned_wins": 53,
+      "mean_delta": 0.1051,
+      "n": 79,
+      "regression_rate": 0.3291,
+      "tie_rate": 0.0,
+      "ties": 0,
+      "tolerance": 1e-12,
+      "win_rate": 0.6709
+    },
+    "paired_rouge_l_f1": {
+      "base_wins": 18,
+      "finetuned_wins": 61,
+      "mean_delta": 0.1178,
+      "n": 79,
+      "regression_rate": 0.2278,
+      "tie_rate": 0.0,
+      "ties": 0,
+      "tolerance": 1e-12,
+      "win_rate": 0.7722
+    },
+    "phase5d_code": "PASS",
+    "phase5d_status": "PASS",
+    "ready_for_phase5e": true,
+    "schema_version": "phase5e.v1",
+    "source_phase5d_dir": "data\\training\\phase5d",
+    "test_count": 79
+  },
+  "git": {
+    "commit": "86e692785b812b9f9febd07951d2f2bbeff269ea",
+    "dirty": true
+  },
+  "phase5d": {
+    "base_test_loss": 1.9303041916661194,
+    "best_adapter_signature_sha256": "47b7005619f52ae7093c277cd46b1e3c98164f2131073debea2e7170547dc9be",
+    "code": "PASS",
+    "eval_protocol_signature": "a7122ab5ebdb522c43f3bcfc5446571e747952e6d753327cb864c2949418568c",
+    "expected_lora_layers": 252,
+    "finetuned_test_loss": 1.2240790855394719,
+    "generation_max_new_tokens": 1610,
+    "model_name": "Qwen/Qwen3-8B",
+    "model_revision": "b968826d9c46dd6066d109eabc6255188de91218",
+    "pass_": true,
+    "phase5d_report_path": "data\\training\\phase5d\\phase5d_report.json",
+    "predictions_rows": 79,
+    "protocol_frozen": true,
+    "ready_for_phase5e": true,
+    "reasons": [],
+    "status": "PASS",
+    "test_count": 79,
+    "test_jsonl_sha256": "b77a51613ebe6b75d2d7f9e676a0f41adfd9e6c5093da19651076967122f5db8",
+    "test_loss_improvement": 0.7062251061266476,
+    "test_loss_improvement_pct": 36.58620797570137,
+    "test_sample_id_signature": "e510cf41fac8d245c4219e86f5ca02e46ad15f6638ba388d67c86c79b49ce587",
+    "tokenizer_signature": "4ac4fed6d76f2cddf5ee756990b7bd4dc40655f96e4c6be460dc3299e73651c0"
+  },
+  "project_complete": true,
+  "reasons": [],
+  "release": {
+    "checksums_path": "outputs\\phase5e\\release\\checksums.sha256",
+    "file_count": 11,
+    "file_inventory": [
+      {
+        "path": "adapter/adapter_config.json",
+        "sha256": "b7e18df49e28b8f03443e65102f1214a22b280149690e0f40da6968ba36b2241",
+        "size_bytes": 1336
+      },
+      {
+        "path": "adapter/adapter_model.safetensors",
+        "sha256": "43e620aa7f1abae8d00c0efa2c5a4a4f261bb0a1c3ffc949ce999c3cf63d5ebf",
+        "size_bytes": 174655536
+      },
+      {
+        "path": "adapter/chat_template.jinja",
+        "sha256": "51fa65c79bb57f058dc7ef8734884bd325fe9d45bb03a61bfef59785d3bc2da9",
+        "size_bytes": 4256
+      },
+      {
+        "path": "adapter/README.md",
+        "sha256": "e0354eefac17f62136513c011d8110216655e0c0ea266f4ec9a92540fe357390",
+        "size_bytes": 5202
+      },
+      {
+        "path": "adapter/tokenizer.json",
+        "sha256": "476870a1f2fb6f6a2759a6ede2383bf9d5d738f17844563b65c91965b722ae09",
+        "size_bytes": 11422924
+      },
+      {
+        "path": "adapter/tokenizer_config.json",
+        "sha256": "c1e53862bc0cac6854244bb2ae079c09e97ba9c479619ad40d496e64b20dc3ba",
+        "size_bytes": 5656
+      },
+      {
+        "path": "evaluation_summary.json",
+        "sha256": "ce4994239e34e1f83906ecf4762210270d4844328cc0ee5acbb4553a14b7336d",
+        "size_bytes": 1997
+      },
+      {
+        "path": "MODEL_CARD.md",
+        "sha256": "fe300756b825455a019eb02955da8598a6213cdaa680c8330d19b0250b5cc464",
+        "size_bytes": 6963
+      },
+      {
+        "path": "release_manifest.json",
+        "sha256": "830b61e8de9f34b9b7772462c68b6a51b657d7d4b9a5d3458dbd5da00d68058b",
+        "size_bytes": 5593
+      },
+      {
+        "path": "RELEASE_README.md",
+        "sha256": "d1e0d22ea5b0669aad5e20b699a3f225580d5013314de29936605ddd96b7835e",
+        "size_bytes": 3547
+      },
+      {
+        "path": "training_summary.json",
+        "sha256": "1d72bc3314ab69cf42e0175cce12cf305cda559e041b554d6d47d9b4cdb9a7f3",
+        "size_bytes": 2276
+      }
+    ],
+    "release_manifest_path": "outputs\\phase5e\\release\\release_manifest.json",
+    "release_root": "outputs\\phase5e\\release"
+  },
+  "release_manifest_summary": {
+    "base_model": {
+      "compute_dtype": "bfloat16",
+      "double_quant": true,
+      "load_in_4bit": true,
+      "model_name": "Qwen/Qwen3-8B",
+      "quant_type": "nf4",
+      "revision": "b968826d9c46dd6066d109eabc6255188de91218"
+    },
+    "held_out_test": {
+      "base_char_f1": 0.2702,
+      "base_rouge_l": 0.1447,
+      "base_test_loss": 1.9303041916661194,
+      "finetuned_char_f1": 0.3753,
+      "finetuned_rouge_l": 0.2626,
+      "finetuned_test_loss": 1.2240790855394719,
+      "improvement": 0.7062251061266476,
+      "improvement_pct": 36.58620797570137,
+      "paired_char_f1_ties": 0,
+      "paired_char_f1_wins_base": 26,
+      "paired_char_f1_wins_finetuned": 53,
+      "paired_rouge_l_ties": 0,
+      "paired_rouge_l_wins_base": 18,
+      "paired_rouge_l_wins_finetuned": 61
+    },
+    "lora": {
+      "alpha": 32,
+      "bias": "none",
+      "dropout": 0.05,
+      "lora_layers": 252,
+      "r": 16,
+      "target_modules": "all-linear",
+      "trainable_params": 43646976
+    },
+    "release_created_at": "2026-08-31T03:04:59.728090+00:00",
+    "release_type": "lora_adapter",
+    "schema_version": "phase5e.v1",
+    "training": {
+      "assistant_only_loss": true,
+      "backend": "unsloth",
+      "batch_size": 8,
+      "bf16": true,
+      "data_seed": 42,
+      "effective_batch": 8,
+      "epochs": 3,
+      "eval_strategy": "epoch",
+      "fp16": false,
+      "global_steps": 432,
+      "gradient_accumulation": 1,
+      "gradient_checkpointing": true,
+      "greater_is_better": false,
+      "learning_rate": 0.0001,
+      "load_best_model_at_end": true,
+      "max_grad_norm": 1.0,
+      "max_length": 2048,
+      "metric_for_best_model": "eval_loss",
+      "packing": false,
+      "save_strategy": "epoch",
+      "scheduler": "linear",
+      "seed": 42,
+      "warmup_ratio": 0.03,
+      "weight_decay": 0.0
+    }
+  },
+  "sanity_inference": {
+    "non_empty_count": 3,
+    "outputs": [
+      {
+        "non_empty": true,
+        "prompt": "什么是基层党组织？",
+        "text": "基层党组织是党在社会基层组织中的战斗堡垒，是党的全部工作和战斗力的基础。基层党组织是党在企业、农村、机关、学校、科研院所、街道社区、社会组织和其他基层单位设立的发挥战斗堡垒作用的组织。"
+      },
+      {
+        "non_empty": true,
+        "prompt": "党的组织生活主要包括哪些内容？",
+        "text": "党的组织生活，是党的组织生活制度的重要内容，主要包括以下内容：\n\n（1）党的组织生活会。指党支部或者党小组以交流思想、总结经验教训、开展批评与自我批评为中心内容的组织生活制度。\n\n（2）党支部委员会。指党支部委员会以讨论和决定党支部工作中的重大问题为主要内容的组织生活制度。\n\n（3）党课。指有计划地对党员进行教育的一种形式。\n\n（4）党员汇报。指党员向党组织汇报思想、工作、学习等情况的一种形式。\n\n（5）民主评议党员。指按照有关规定，定期对每个党员的表现和作用进行评议的一种形式。\n\n（6）党日活动。指有计划地组织党员在党内过党的组织生活的一种形式。\n\n（7）党小组会。指党小组以讨论研究贯彻执行党支部决议和安排布置党小组工作为主要内容的组织生活制度。\n\n（8）党小组长会议。指党小组长会议以研究党小组工作为主要内容的组织生活制度。\n\n（9）党员领导干部民主生活会。指党员领导干部以交流思想、总结经验教训、开展批评与自我批评为中心内容的组织生活制度。\n\n（10）党员领导干部双重组织生活会。指党员领导干部既要参加所在党支部、党小组的"
+      },
+      {
+        "non_empty": true,
+        "prompt": "基层党组织的主要作用是什么？",
+        "text": "基层党组织是党在社会基层组织中的战斗堡垒，是党的全部工作和战斗力的基础。基层党组织的主要作用是：\n\n（1）宣传和执行党的路线、方针、政策，宣传和执行党中央、上级组织和本组织的决议，充分发挥党员的先锋模范作用，积极创先争优，团结、组织党内外的干部和群众，努力完成本单位所担负的任务。\n\n（2）组织党员认真学习马克思列宁主义、毛泽东思想、邓小平理论、“三个代表”重要思想、科学发展观、习近平新时代中国特色社会主义思想，推进“两学一做”学习教育、党史学习教育常态化制度化，学习党的路线、方针、政策和决议，学习党的基本知识，学习科学、文化、法律和业务知识。\n\n（3）对党员进行教育、管理、监督和服务，提高党员素质，坚定理想信念，增强党性，严格党的组织生活，开展批评和自我批评，维护和执行党的纪律，监督党员切实履行义务，保障党员的权利不受侵犯。加强和改进流动党员管理。\n\n（4）密切联系群众，经常了解群众对党员、党的工作的批评和意见，维护群众的正当权利和利益，做好群众的思想政治工作。\n\n（5）充分发挥党员"
+      }
+    ],
+    "prompts": [
+      "什么是基层党组织？",
+      "党的组织生活主要包括哪些内容？",
+      "基层党组织的主要作用是什么？"
+    ],
+    "total_count": 3
+  },
+  "schema_version": "phase5e.v1",
+  "training_summary": {
+    "backend": "unsloth",
+    "dataset": {
+      "train_count": 1149,
+      "train_sample_id_signature": "58ae3a429e1120413d58814c27c1ec7795f7d20afc73334ed69a25ff4c8e4bfc",
+      "train_sha256": "b59927afe162bc9eef340386b01775ea8796032aeb5fda324652b15d6e1ae58c",
+      "validation_count": 75,
+      "validation_sample_id_signature": "56e4ac9398ff69ca22725eb8e292e23665d4d6cf5bae92abc76ede199d8a0740",
+      "validation_sha256": "61d29e321f4c8259870dddb50a8f99d914a87372233e90cdf96b8465d0dc64a4"
+    },
+    "lora": {
+      "all_params": 4761498624,
+      "alpha": 32,
+      "bias": "none",
+      "dropout": 0.05,
+      "lora_layers": 252,
+      "r": 16,
+      "target_modules": "all-linear",
+      "task_type": "CAUSAL_LM",
+      "trainable_params": 43646976
+    },
+    "model_name": "Qwen/Qwen3-8B",
+    "model_revision": "b968826d9c46dd6066d109eabc6255188de91218",
+    "quantization": {
+      "compute_dtype": "bfloat16",
+      "double_quant": true,
+      "max_length": 2048,
+      "quant_type": "nf4"
+    },
+    "schema_version": "phase5e.v1",
+    "source_final_report": "data\\training\\phase5c_b\\final_report.json",
+    "source_run_manifest": "data\\training\\phase5c_b\\run_manifest.json",
+    "tokenizer_signature": "4ac4fed6d76f2cddf5ee756990b7bd4dc40655f96e4c6be460dc3299e73651c0",
+    "training": {
+      "assistant_only_loss": true,
+      "bf16": true,
+      "data_seed": 42,
+      "effective_batch_size": 8,
+      "epochs": 3,
+      "eval_strategy": "epoch",
+      "fp16": false,
+      "global_steps": 432,
+      "gradient_accumulation_steps": 1,
+      "gradient_checkpointing": true,
+      "greater_is_better": false,
+      "learning_rate": 0.0001,
+      "load_best_model_at_end": true,
+      "lr_scheduler_type": "linear",
+      "max_grad_norm": 1.0,
+      "metric_for_best_model": "eval_loss",
+      "packing": false,
+      "per_device_train_batch_size": 8,
+      "save_strategy": "epoch",
+      "save_total_limit": 2,
+      "seed": 42,
+      "warmup_ratio": 0.03,
+      "weight_decay": 0.0
+    },
+    "validation": {
+      "before_training": 2.108738660812378,
+      "best_checkpoint": "checkpoint-288",
+      "best_epoch": 2,
+      "best_eval_loss": 1.1593782901763916,
+      "best_is_last": false,
+      "epoch_eval_losses": [
+        1.164391040802002,
+        1.1593782901763916,
+        1.1902490854263306
+      ]
+    }
+  }
+}

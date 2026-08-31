@@ -15,17 +15,7 @@ env/
 # Unsloth compiled cache
 unsloth_compiled_cache/
 
-# Original raw data (read-only inputs)
-data/raw/**
-
 # Generated artifacts
-data/extracted/**
-data/processed/**
-data/chunks/**
-data/sft/**
-data/tokenizer/**
-data/training/**
-!data/training/.gitkeep
 outputs/**
 logs/**
 

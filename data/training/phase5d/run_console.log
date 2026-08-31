@@ -1,0 +1,468 @@
+﻿python.exe : C:\Users\abai\QLoRA-STF--\.venv-unsloth\Lib\site-packages\unsloth\__init__.py:1531: UserWarning: WARNING: 
+Unsloth should be imported before [transformers] to ensure all optimizations are applied. Your code may run slower or e
+ncounter memory issues without these optimizations.
+所在位置 行:4 字符: 58
++ ... FFERED="1"; & ".\.venv-unsloth\Scripts\python.exe" scripts/evaluate_q ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\abai\Q... optimizations.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+Please restructure your imports with 'import unsloth' at the top of your file.
+  from ._gpu_init import *
+🦥 Unsloth: Will patch your computer to enable 2x faster free finetuning.
+W0831 09:37:15.846000 39112 Lib\site-packages\torch\distributed\elastic\multiprocessing\redirects.py:29] NOTE: Redirect
+s are currently not supported in Windows or MacOs.
+🦥 Unsloth Zoo will now patch everything to make training faster!
+==((====))==  Unsloth 2026.8.21: Fast Qwen3 patching. Transformers: 5.5.0.
+   \\   /|    NVIDIA GeForce RTX 5090. Num GPUs = 1. Max memory: 31.842 GB. Platform: Windows.
+O^O/ \_/ \    Torch: 2.11.0+cu128. CUDA: 12.0. CUDA Toolkit: 12.8. Triton: 3.7.1
+\        /    Bfloat16 = TRUE. FA [Xformers = 0.0.35. FA2 = False]
+ "-____-"     Free license: http://github.com/unslothai/unsloth
+
+Loading weights:   0%|          | 0/399 [00:00<?, ?it/s]
+Loading weights:   0%|          | 1/399 [00:00<05:44,  1.15it/s]
+Loading weights:   1%|          | 2/399 [00:01<05:43,  1.16it/s]
+Loading weights:   1%|          | 4/399 [00:01<02:26,  2.70it/s]
+Loading weights:   2%|▏         | 6/399 [00:02<01:28,  4.43it/s]
+Loading weights:   4%|▍         | 15/399 [00:02<00:25, 14.97it/s]
+Loading weights:   5%|▍         | 19/399 [00:02<00:21, 17.44it/s]
+Loading weights:   7%|▋         | 26/399 [00:02<00:15, 24.74it/s]
+Loading weights:   8%|▊         | 30/399 [00:02<00:15, 23.28it/s]
+Loading weights:   9%|▉         | 37/399 [00:02<00:13, 27.51it/s]
+Loading weights:  10%|█         | 41/399 [00:03<00:14, 25.33it/s]
+Loading weights:  12%|█▏        | 48/399 [00:03<00:12, 29.19it/s]
+Loading weights:  13%|█▎        | 52/399 [00:03<00:12, 28.72it/s]
+Loading weights:  15%|█▍        | 59/399 [00:03<00:10, 32.14it/s]
+Loading weights:  16%|█▌        | 63/399 [00:03<00:11, 28.81it/s]
+Loading weights:  18%|█▊        | 70/399 [00:03<00:10, 32.06it/s]
+Loading weights:  19%|█▊        | 74/399 [00:04<00:10, 31.15it/s]
+Loading weights:  20%|██        | 81/399 [00:04<00:08, 35.76it/s]
+Loading weights:  21%|██▏       | 85/399 [00:04<00:09, 32.23it/s]
+Loading weights:  23%|██▎       | 92/399 [00:04<00:08, 36.25it/s]
+Loading weights:  24%|██▍       | 96/399 [00:04<00:09, 32.79it/s]
+Loading weights:  26%|██▌       | 103/399 [00:04<00:07, 37.76it/s]
+Loading weights:  27%|██▋       | 107/399 [00:04<00:08, 35.35it/s]
+Loading weights:  29%|██▊       | 114/399 [00:05<00:06, 40.96it/s]
+Loading weights:  30%|██▉       | 119/399 [00:05<00:07, 36.60it/s]
+Loading weights:  31%|███▏      | 125/399 [00:05<00:07, 37.15it/s]
+Loading weights:  32%|███▏      | 129/399 [00:05<00:07, 34.87it/s]
+Loading weights:  34%|███▍      | 136/399 [00:05<00:06, 42.53it/s]
+Loading weights:  35%|███▌      | 141/399 [00:05<00:07, 34.04it/s]
+Loading weights:  37%|███▋      | 147/399 [00:05<00:06, 37.22it/s]
+Loading weights:  38%|███▊      | 152/399 [00:06<00:07, 32.98it/s]
+Loading weights:  40%|███▉      | 158/399 [00:06<00:06, 35.96it/s]
+Loading weights:  41%|████      | 162/399 [00:06<00:07, 30.63it/s]
+Loading weights:  42%|████▏     | 169/399 [00:06<00:06, 33.45it/s]
+Loading weights:  43%|████▎     | 173/399 [00:06<00:07, 29.51it/s]
+Loading weights:  45%|████▌     | 180/399 [00:07<00:06, 32.29it/s]
+Loading weights:  46%|████▌     | 184/399 [00:07<00:07, 28.78it/s]
+Loading weights:  48%|████▊     | 191/399 [00:07<00:06, 30.53it/s]
+Loading weights:  49%|████▉     | 195/399 [00:07<00:07, 27.54it/s]
+Loading weights:  51%|█████     | 202/399 [00:07<00:06, 31.18it/s]
+Loading weights:  52%|█████▏    | 206/399 [00:07<00:06, 28.35it/s]
+Loading weights:  53%|█████▎    | 213/399 [00:08<00:05, 31.53it/s]
+Loading weights:  54%|█████▍    | 217/399 [00:08<00:06, 30.03it/s]
+Loading weights:  56%|█████▌    | 224/399 [00:08<00:04, 35.58it/s]
+Loading weights:  57%|█████▋    | 228/399 [00:08<00:05, 32.43it/s]
+Loading weights:  59%|█████▉    | 235/399 [00:08<00:04, 34.51it/s]
+Loading weights:  60%|█████▉    | 239/399 [00:08<00:05, 31.29it/s]
+Loading weights:  62%|██████▏   | 246/399 [00:09<00:04, 37.34it/s]
+Loading weights:  63%|██████▎   | 250/399 [00:09<00:04, 33.77it/s]
+Loading weights:  64%|██████▍   | 257/399 [00:09<00:03, 37.85it/s]
+Loading weights:  65%|██████▌   | 261/399 [00:09<00:03, 35.39it/s]
+Loading weights:  67%|██████▋   | 268/399 [00:09<00:03, 41.47it/s]
+Loading weights:  68%|██████▊   | 273/399 [00:09<00:03, 40.24it/s]
+Loading weights:  70%|██████▉   | 279/399 [00:09<00:02, 41.88it/s]
+Loading weights:  71%|███████   | 284/399 [00:10<00:03, 36.23it/s]
+Loading weights:  73%|███████▎  | 290/399 [00:10<00:02, 36.88it/s]
+Loading weights:  74%|███████▎  | 294/399 [00:10<00:03, 31.49it/s]
+Loading weights:  75%|███████▌  | 301/399 [00:10<00:02, 33.27it/s]
+Loading weights:  76%|███████▋  | 305/399 [00:10<00:03, 28.29it/s]
+Loading weights:  78%|███████▊  | 312/399 [00:11<00:02, 31.42it/s]
+Loading weights:  79%|███████▉  | 316/399 [00:11<00:02, 28.97it/s]
+Loading weights:  81%|████████  | 323/399 [00:11<00:02, 33.49it/s]
+Loading weights:  82%|████████▏ | 327/399 [00:11<00:02, 30.43it/s]
+Loading weights:  84%|████████▎ | 334/399 [00:11<00:01, 33.99it/s]
+Loading weights:  85%|████████▍ | 338/399 [00:11<00:02, 29.93it/s]
+Loading weights:  86%|████████▌ | 343/399 [00:11<00:01, 33.55it/s]
+Loading weights:  87%|████████▋ | 347/399 [00:12<00:02, 25.35it/s]
+Loading weights:  89%|████████▉ | 356/399 [00:12<00:01, 32.12it/s]
+Loading weights:  90%|█████████ | 360/399 [00:12<00:01, 27.43it/s]
+Loading weights:  92%|█████████▏| 367/399 [00:12<00:01, 29.77it/s]
+Loading weights:  93%|█████████▎| 371/399 [00:13<00:00, 28.27it/s]
+Loading weights:  95%|█████████▍| 378/399 [00:13<00:00, 32.72it/s]
+Loading weights:  96%|█████████▌| 382/399 [00:13<00:00, 30.05it/s]
+Loading weights:  97%|█████████▋| 389/399 [00:13<00:00, 34.48it/s]
+Loading weights:  98%|█████████▊| 393/399 [00:13<00:00, 30.63it/s]
+Loading weights: 100%|██████████| 399/399 [00:13<00:00, 29.03it/s]
+[evaluate_qlora_test|INFO][base] is_4bit=True linear4bit=252
+[evaluate_qlora_test|INFO][base] computing teacher-forced assistant-only loss on 79 samples...
+`use_return_dict` is deprecated! Use `return_dict` instead!
+[evaluate_qlora_test|INFO][base] loss  loss=1.930304 ppl=6.891606 sup_tokens=14815 runtime=24.8s
+[evaluate_qlora_test|INFO][base] generating 79/79...
+[evaluate_qlora_test|INFO][base] released
+[evaluate_qlora_test|INFO][finetuned] loading BASE + best_adapter...
+==((====))==  Unsloth 2026.8.21: Fast Qwen3 patching. Transformers: 5.5.0.
+   \\   /|    NVIDIA GeForce RTX 5090. Num GPUs = 1. Max memory: 31.842 GB. Platform: Windows.
+O^O/ \_/ \    Torch: 2.11.0+cu128. CUDA: 12.0. CUDA Toolkit: 12.8. Triton: 3.7.1
+\        /    Bfloat16 = TRUE. FA [Xformers = 0.0.35. FA2 = False]
+ "-____-"     Free license: http://github.com/unslothai/unsloth
+
+Loading weights:   0%|          | 0/399 [00:00<?, ?it/s]
+Loading weights:   0%|          | 1/399 [00:00<05:54,  1.12it/s]
+Loading weights:   1%|          | 2/399 [00:01<05:40,  1.16it/s]
+Loading weights:   1%|▏         | 5/399 [00:01<01:47,  3.67it/s]
+Loading weights:   3%|▎         | 10/399 [00:01<00:44,  8.82it/s]
+Loading weights:   4%|▍         | 15/399 [00:02<00:26, 14.46it/s]
+Loading weights:   5%|▍         | 19/399 [00:02<00:21, 17.50it/s]
+Loading weights:   7%|▋         | 26/399 [00:02<00:14, 26.44it/s]
+Loading weights:   8%|▊         | 31/399 [00:02<00:12, 28.72it/s]
+Loading weights:   9%|▉         | 37/399 [00:02<00:10, 33.39it/s]
+Loading weights:  11%|█         | 42/399 [00:02<00:10, 33.37it/s]
+Loading weights:  12%|█▏        | 48/399 [00:02<00:09, 36.82it/s]
+Loading weights:  13%|█▎        | 53/399 [00:02<00:09, 35.74it/s]
+Loading weights:  15%|█▍        | 59/399 [00:03<00:09, 36.69it/s]
+Loading weights:  16%|█▌        | 63/399 [00:03<00:10, 33.27it/s]
+Loading weights:  18%|█▊        | 70/399 [00:03<00:08, 37.93it/s]
+Loading weights:  19%|█▊        | 74/399 [00:03<00:09, 35.35it/s]
+Loading weights:  20%|██        | 81/399 [00:03<00:08, 39.58it/s]
+Loading weights:  22%|██▏       | 86/399 [00:03<00:08, 36.54it/s]
+Loading weights:  23%|██▎       | 92/399 [00:04<00:07, 39.56it/s]
+Loading weights:  24%|██▍       | 97/399 [00:04<00:08, 37.14it/s]
+Loading weights:  26%|██▌       | 103/399 [00:04<00:07, 39.97it/s]
+Loading weights:  27%|██▋       | 108/399 [00:04<00:07, 38.21it/s]
+Loading weights:  29%|██▊       | 114/399 [00:04<00:06, 41.27it/s]
+Loading weights:  30%|██▉       | 119/399 [00:04<00:07, 38.57it/s]
+Loading weights:  31%|███▏      | 125/399 [00:04<00:06, 40.48it/s]
+Loading weights:  33%|███▎      | 130/399 [00:05<00:07, 37.65it/s]
+Loading weights:  34%|███▍      | 136/399 [00:05<00:06, 40.02it/s]
+Loading weights:  35%|███▌      | 141/399 [00:05<00:06, 37.71it/s]
+Loading weights:  37%|███▋      | 147/399 [00:05<00:06, 41.92it/s]
+Loading weights:  38%|███▊      | 152/399 [00:05<00:06, 36.83it/s]
+Loading weights:  40%|███▉      | 158/399 [00:05<00:06, 39.44it/s]
+Loading weights:  41%|████      | 163/399 [00:05<00:06, 37.49it/s]
+Loading weights:  42%|████▏     | 169/399 [00:05<00:05, 40.98it/s]
+Loading weights:  44%|████▎     | 174/399 [00:06<00:05, 38.58it/s]
+Loading weights:  45%|████▌     | 180/399 [00:06<00:05, 41.54it/s]
+Loading weights:  46%|████▋     | 185/399 [00:06<00:05, 37.15it/s]
+Loading weights:  48%|████▊     | 191/399 [00:06<00:05, 36.42it/s]
+Loading weights:  49%|████▉     | 195/399 [00:06<00:06, 31.13it/s]
+Loading weights:  51%|█████     | 202/399 [00:06<00:05, 36.69it/s]
+Loading weights:  52%|█████▏    | 206/399 [00:07<00:05, 34.66it/s]
+Loading weights:  53%|█████▎    | 213/399 [00:07<00:04, 38.20it/s]
+Loading weights:  54%|█████▍    | 217/399 [00:07<00:05, 34.90it/s]
+Loading weights:  56%|█████▌    | 224/399 [00:07<00:04, 40.50it/s]
+Loading weights:  57%|█████▋    | 229/399 [00:07<00:04, 40.17it/s]
+Loading weights:  59%|█████▉    | 235/399 [00:07<00:03, 42.84it/s]
+Loading weights:  60%|██████    | 240/399 [00:07<00:03, 39.89it/s]
+Loading weights:  62%|██████▏   | 246/399 [00:07<00:03, 42.44it/s]
+Loading weights:  63%|██████▎   | 251/399 [00:08<00:03, 37.82it/s]
+Loading weights:  64%|██████▍   | 257/399 [00:08<00:03, 40.59it/s]
+Loading weights:  66%|██████▌   | 262/399 [00:08<00:03, 40.41it/s]
+Loading weights:  67%|██████▋   | 267/399 [00:08<00:03, 38.94it/s]
+Loading weights:  68%|██████▊   | 271/399 [00:09<00:08, 15.03it/s]
+Loading weights:  70%|██████▉   | 279/399 [00:09<00:05, 20.89it/s]
+Loading weights:  71%|███████   | 283/399 [00:09<00:05, 20.77it/s]
+Loading weights:  73%|███████▎  | 290/399 [00:09<00:04, 24.93it/s]
+Loading weights:  74%|███████▎  | 294/399 [00:10<00:04, 23.85it/s]
+Loading weights:  75%|███████▍  | 299/399 [00:10<00:03, 27.97it/s]
+Loading weights:  76%|███████▌  | 303/399 [00:10<00:06, 13.92it/s]
+Loading weights:  78%|███████▊  | 312/399 [00:11<00:04, 20.17it/s]
+Loading weights:  79%|███████▉  | 316/399 [00:11<00:04, 20.58it/s]
+Loading weights:  81%|████████  | 323/399 [00:11<00:02, 25.38it/s]
+Loading weights:  82%|████████▏ | 327/399 [00:11<00:02, 25.18it/s]
+Loading weights:  84%|████████▎ | 334/399 [00:11<00:02, 29.97it/s]
+Loading weights:  85%|████████▍ | 338/399 [00:11<00:02, 28.39it/s]
+Loading weights:  86%|████████▋ | 345/399 [00:12<00:01, 32.75it/s]
+Loading weights:  87%|████████▋ | 349/399 [00:12<00:01, 29.91it/s]
+Loading weights:  89%|████████▉ | 356/399 [00:12<00:01, 34.14it/s]
+Loading weights:  90%|█████████ | 360/399 [00:12<00:01, 30.88it/s]
+Loading weights:  92%|█████████▏| 367/399 [00:12<00:00, 34.66it/s]
+Loading weights:  93%|█████████▎| 371/399 [00:12<00:00, 31.65it/s]
+Loading weights:  95%|█████████▍| 378/399 [00:13<00:00, 35.38it/s]
+Loading weights:  96%|█████████▌| 382/399 [00:13<00:00, 31.93it/s]
+Loading weights:  97%|█████████▋| 389/399 [00:13<00:00, 35.74it/s]
+Loading weights:  98%|█████████▊| 393/399 [00:13<00:00, 32.37it/s]
+Loading weights: 100%|██████████| 399/399 [00:13<00:00, 29.34it/s]
+
+Loading weights:   0%|          | 0/504 [00:00<?, ?it/s]
+Loading weights:  41%|████      | 206/504 [00:00<00:00, 2057.55it/s]
+Loading weights:  83%|████████▎ | 420/504 [00:00<00:00, 2105.37it/s]
+Loading weights: 100%|██████████| 504/504 [00:00<00:00, 2131.75it/s]
+[evaluate_qlora_test|INFO][finetuned] LoRA layers = 252
+[evaluate_qlora_test|INFO][finetuned] computing teacher-forced assistant-only loss on 79 samples...
+[evaluate_qlora_test|INFO][finetuned] loss  loss=1.224079 ppl=3.401033 sup_tokens=14815 runtime=8.5s
+[evaluate_qlora_test|INFO][finetuned] generating 79/79...
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+[evaluate_qlora_test|INFO][finetuned] generation 1/79
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+[evaluate_qlora_test|INFO][finetuned] saved 5/79 to predictions
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+[evaluate_qlora_test|INFO][finetuned] saved 10/79 to predictions
+[evaluate_qlora_test|INFO][finetuned] generation 10/79
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+[evaluate_qlora_test|INFO][finetuned] saved 15/79 to predictions
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+[evaluate_qlora_test|INFO][finetuned] saved 20/79 to predictions
+[evaluate_qlora_test|INFO][finetuned] generation 20/79
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+[evaluate_qlora_test|INFO][finetuned] saved 25/79 to predictions
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+[evaluate_qlora_test|INFO][finetuned] saved 30/79 to predictions
+[evaluate_qlora_test|INFO][finetuned] generation 30/79
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+[evaluate_qlora_test|INFO][finetuned] saved 35/79 to predictions
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+[evaluate_qlora_test|INFO][finetuned] saved 40/79 to predictions
+[evaluate_qlora_test|INFO][finetuned] generation 40/79
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+[evaluate_qlora_test|INFO][finetuned] saved 45/79 to predictions
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+[evaluate_qlora_test|INFO][finetuned] saved 50/79 to predictions
+[evaluate_qlora_test|INFO][finetuned] generation 50/79
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+[evaluate_qlora_test|INFO][finetuned] saved 55/79 to predictions
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+[evaluate_qlora_test|INFO][finetuned] saved 60/79 to predictions
+[evaluate_qlora_test|INFO][finetuned] generation 60/79
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+[evaluate_qlora_test|INFO][finetuned] saved 65/79 to predictions
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+[evaluate_qlora_test|INFO][finetuned] saved 70/79 to predictions
+[evaluate_qlora_test|INFO][finetuned] generation 70/79
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+[evaluate_qlora_test|INFO][finetuned] saved 75/79 to predictions
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+Both `max_new_tokens` (=1610) and `max_length`(=40960) seem to have been set. `max_new_tokens` will take precedence. Pl
+ease refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/te
+xt_generation)
+[evaluate_qlora_test|INFO][finetuned] saved 79/79 to predictions
+[evaluate_qlora_test|INFO][finetuned] generation 79/79
+[evaluate_qlora_test|INFO][finetuned] released
+[evaluate_qlora_test|INFO]============================================================
+[evaluate_qlora_test|INFO][result] PHASE5D_CODE = PASS
+[evaluate_qlora_test|INFO][result] READY_FOR_PHASE5E = True
+[evaluate_qlora_test|INFO][result] base_loss=1.930304 ft_loss=1.224079 improvement=0.706225 (36.586%)
+[evaluate_qlora_test|INFO][result] base char_f1=0.2702 ft char_f1=0.3753
+[evaluate_qlora_test|INFO][result] base rouge_l=0.1447 ft rouge_l=0.2626
+[evaluate_qlora_test|INFO][result] paired cf1: ft_wins=53 base_wins=26 ties=0 tolerance=1e-12
+[evaluate_qlora_test|INFO][result] paired rl: ft_wins=61 base_wins=18 ties=0 tolerance=1e-12
+[evaluate_qlora_test|INFO]============================================================

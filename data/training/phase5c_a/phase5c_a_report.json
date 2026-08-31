@@ -1,0 +1,492 @@
+{
+  "adapter_reload": {
+    "hf": [
+      "README.md",
+      "adapter_config.json",
+      "adapter_model.safetensors",
+      "chat_template.jinja",
+      "tokenizer.json",
+      "tokenizer_config.json"
+    ],
+    "hf_inference": {
+      "generated_char_count": 112,
+      "generated_token_count": 64,
+      "nonempty": true,
+      "preview": "基层党组织是党的组织体系的根基，是党在社会基层组织中的战斗堡垒，是党的全部工作和战斗力的基础。基层党组织是党在社会基层单位中的战斗堡垒，是党的全部工作和战斗力的基础。基层党组织是党在社会基层单位中的战斗堡垒，是党的全部工作和"
+    },
+    "unsloth": [
+      "README.md",
+      "adapter_config.json",
+      "adapter_model.safetensors",
+      "chat_template.jinja",
+      "tokenizer.json",
+      "tokenizer_config.json"
+    ],
+    "unsloth_inference": {
+      "generated_char_count": 104,
+      "generated_token_count": 64,
+      "nonempty": true,
+      "preview": "基层党组织是党的组织体系的根基，是党在社会基层组织中的战斗堡垒，是党的全部工作和战斗力的基础。基层党组织是党的组织体系的“神经末梢”，是党联系群众的“最后一公里”，是党在基层的“政治引领者”和“组织者”。基层"
+    }
+  },
+  "assistant_mask": {
+    "hf": {
+      "checked_samples": 3,
+      "pass": true
+    },
+    "parity": true,
+    "unsloth": {
+      "checked_samples": 3,
+      "pass": true
+    }
+  },
+  "backend": {
+    "hf": {
+      "library_versions": {
+        "accelerate": "1.14.0",
+        "arch_list": [
+          "sm_75",
+          "sm_80",
+          "sm_86",
+          "sm_90",
+          "sm_100",
+          "sm_120"
+        ],
+        "bf16_supported": true,
+        "bitsandbytes": "0.50.1",
+        "compute_capability": [
+          12,
+          0
+        ],
+        "cuda_available": true,
+        "cuda_version": "12.8",
+        "datasets": "5.0.1",
+        "device_name": "NVIDIA GeForce RTX 5090",
+        "peft": "0.20.0",
+        "pip_check": {
+          "passed": true,
+          "returncode": 0,
+          "stderr": "",
+          "stdout": "No broken requirements found."
+        },
+        "torch": "2.11.0+cu128",
+        "total_memory_gib": 31.842,
+        "transformers": "5.15.0",
+        "triton": "NOT_AVAILABLE: ModuleNotFoundError",
+        "trl": "1.10.0",
+        "unsloth": "NOT_AVAILABLE: ModuleNotFoundError",
+        "unsloth_zoo": "NOT_AVAILABLE: ModuleNotFoundError",
+        "venv": "C:\\Users\\abai\\QLoRA-STF--\\.venv",
+        "xformers": "NOT_AVAILABLE: ModuleNotFoundError"
+      },
+      "metadata": {
+        "depends_on_unsloth": false,
+        "description": "Transformers + bitsandbytes + PEFT + TRL SFTTrainer (Phase 5B baseline)",
+        "name": "hf"
+      }
+    },
+    "unsloth": {
+      "library_versions": {
+        "accelerate": "1.14.0",
+        "arch_list": [
+          "sm_75",
+          "sm_80",
+          "sm_86",
+          "sm_90",
+          "sm_100",
+          "sm_120"
+        ],
+        "bf16_supported": true,
+        "bitsandbytes": "0.50.1",
+        "compute_capability": [
+          12,
+          0
+        ],
+        "cuda_available": true,
+        "cuda_version": "12.8",
+        "datasets": "4.3.0",
+        "device_name": "NVIDIA GeForce RTX 5090",
+        "peft": "0.20.0",
+        "pip_check": {
+          "passed": true,
+          "returncode": 0,
+          "stderr": "",
+          "stdout": "No broken requirements found."
+        },
+        "torch": "2.11.0+cu128",
+        "total_memory_gib": 31.842,
+        "transformers": "5.5.0",
+        "triton": "3.7.1",
+        "trl": "0.24.0",
+        "unsloth": "2026.8.21",
+        "unsloth_zoo": "2026.8.15",
+        "venv": "C:\\Users\\abai\\QLoRA-STF--\\.venv-unsloth",
+        "xformers": "0.0.35"
+      },
+      "metadata": {
+        "depends_on_unsloth": true,
+        "description": "Unsloth FastLanguageModel + 4-bit + LoRA + TRL SFTTrainer",
+        "name": "unsloth"
+      }
+    }
+  },
+  "baseline_commit": "6a921c3f5fce8db16f8a1b9c0be448887b3aef32",
+  "batch_probe": {
+    "hf": {
+      "backend": "hf",
+      "reason": "batch=4 peak_reserved=15.912 GiB < 24 GiB；允许追加 batch=8 probe。",
+      "recommended_batch_size": 8,
+      "recommended_gradient_accumulation_steps": 1,
+      "results": [
+        {
+          "adapter_save": true,
+          "batch_size": 1,
+          "global_step": 3,
+          "loss": 1.5701996088027954,
+          "loss_finite": true,
+          "max_steps": 3,
+          "mean_step_seconds": 1.276,
+          "oom": false,
+          "peak_allocated_bytes": 11712523264,
+          "peak_allocated_gib": 10.908,
+          "peak_reserved_bytes": 12484345856,
+          "peak_reserved_gib": 11.627,
+          "peak_reserved_within_80pct": true,
+          "runtime_seconds": 3.828
+        },
+        {
+          "adapter_save": true,
+          "batch_size": 2,
+          "global_step": 3,
+          "loss": 1.6050365765889485,
+          "loss_finite": true,
+          "max_steps": 3,
+          "mean_step_seconds": 1.9783,
+          "oom": false,
+          "peak_allocated_bytes": 12786539520,
+          "peak_allocated_gib": 11.908,
+          "peak_reserved_bytes": 13126074368,
+          "peak_reserved_gib": 12.225,
+          "peak_reserved_within_80pct": true,
+          "runtime_seconds": 5.935
+        },
+        {
+          "adapter_save": true,
+          "batch_size": 4,
+          "global_step": 3,
+          "loss": 1.396560549736023,
+          "loss_finite": true,
+          "max_steps": 3,
+          "mean_step_seconds": 3.801,
+          "oom": false,
+          "peak_allocated_bytes": 16074580480,
+          "peak_allocated_gib": 14.971,
+          "peak_reserved_bytes": 17085497344,
+          "peak_reserved_gib": 15.912,
+          "peak_reserved_within_80pct": true,
+          "runtime_seconds": 11.403
+        },
+        {
+          "adapter_save": true,
+          "batch_size": 8,
+          "global_step": 3,
+          "loss": 1.3280182282129924,
+          "loss_finite": true,
+          "max_steps": 3,
+          "mean_step_seconds": 7.074,
+          "oom": false,
+          "peak_allocated_bytes": 23304443904,
+          "peak_allocated_gib": 21.704,
+          "peak_reserved_bytes": 25048383488,
+          "peak_reserved_gib": 23.328,
+          "peak_reserved_within_80pct": true,
+          "runtime_seconds": 21.222
+        }
+      ],
+      "status": "PASS"
+    },
+    "unsloth": {
+      "backend": "unsloth",
+      "reason": "batch=4 peak_reserved=20.83 GiB < 24 GiB；允许追加 batch=8 probe。",
+      "recommended_batch_size": 8,
+      "recommended_gradient_accumulation_steps": 1,
+      "results": [
+        {
+          "adapter_save": true,
+          "batch_size": 1,
+          "global_step": 3,
+          "loss": 1.6588384707768757,
+          "loss_finite": true,
+          "max_steps": 3,
+          "mean_step_seconds": 1.2313,
+          "oom": false,
+          "peak_allocated_bytes": 13731304960,
+          "peak_allocated_gib": 12.788,
+          "peak_reserved_bytes": 13767802880,
+          "peak_reserved_gib": 12.822,
+          "peak_reserved_within_80pct": true,
+          "runtime_seconds": 3.694
+        },
+        {
+          "adapter_save": true,
+          "batch_size": 2,
+          "global_step": 3,
+          "loss": 1.6890390714009602,
+          "loss_finite": true,
+          "max_steps": 3,
+          "mean_step_seconds": 2.1627,
+          "oom": false,
+          "peak_allocated_bytes": 12399939072,
+          "peak_allocated_gib": 11.548,
+          "peak_reserved_bytes": 13285457920,
+          "peak_reserved_gib": 12.373,
+          "peak_reserved_within_80pct": true,
+          "runtime_seconds": 6.488
+        },
+        {
+          "adapter_save": true,
+          "batch_size": 4,
+          "global_step": 3,
+          "loss": 1.494928240776062,
+          "loss_finite": true,
+          "max_steps": 3,
+          "mean_step_seconds": 3.8383,
+          "oom": false,
+          "peak_allocated_bytes": 16998631936,
+          "peak_allocated_gib": 15.831,
+          "peak_reserved_bytes": 22366126080,
+          "peak_reserved_gib": 20.83,
+          "peak_reserved_within_80pct": true,
+          "runtime_seconds": 11.515
+        },
+        {
+          "adapter_save": true,
+          "batch_size": 8,
+          "global_step": 3,
+          "loss": 1.4659531911214192,
+          "loss_finite": true,
+          "max_steps": 3,
+          "mean_step_seconds": 7.5097,
+          "oom": false,
+          "peak_allocated_bytes": 24936505856,
+          "peak_allocated_gib": 23.224,
+          "peak_reserved_bytes": 26904363008,
+          "peak_reserved_gib": 25.057,
+          "peak_reserved_within_80pct": true,
+          "runtime_seconds": 22.529
+        }
+      ],
+      "status": "PASS"
+    }
+  },
+  "benchmark": {
+    "hf": {
+      "final_loss": 1.1681015126407146,
+      "lora_apply_seconds": 0.881,
+      "loss_finite": true,
+      "mean_step_seconds": 0.4939,
+      "median_step_seconds": 0.4939,
+      "model_load_seconds": 13.012,
+      "peak_allocated_gib": 10.353,
+      "peak_reserved_gib": 10.672,
+      "samples_per_sec": 0.8099,
+      "status": "PASS",
+      "trainer_init_seconds": 1.253,
+      "training_runtime_seconds": 9.878
+    },
+    "unsloth": {
+      "final_loss": 1.62330364882946,
+      "lora_apply_seconds": 1.929,
+      "loss_finite": true,
+      "mean_step_seconds": 0.5132,
+      "median_step_seconds": 0.5132,
+      "model_load_seconds": 12.972,
+      "peak_allocated_gib": 6.478,
+      "peak_reserved_gib": 6.676,
+      "samples_per_sec": 0.7794,
+      "status": "PASS",
+      "trainer_init_seconds": 1.769,
+      "training_runtime_seconds": 10.264
+    }
+  },
+  "end_git_status": "modified: scripts/smoke_train_qlora.py; untracked: scripts/benchmark_qlora_backends.py, src/data_pipeline/training/backends/, tests/test_backend_abstraction.py, .venv-unsloth/, unsloth_compiled_cache/",
+  "files_changed": [
+    "scripts/smoke_train_qlora.py (added --backend)",
+    "scripts/benchmark_qlora_backends.py (new)",
+    "scripts/build_phase5c_a_report.py (new)",
+    "src/data_pipeline/training/backends/__init__.py (new)",
+    "src/data_pipeline/training/backends/base.py (new)",
+    "src/data_pipeline/training/backends/hf.py (new)",
+    "src/data_pipeline/training/backends/unsloth.py (new)",
+    "tests/test_backend_abstraction.py (new)",
+    ".gitignore (added .venv-unsloth/, unsloth_compiled_cache/)"
+  ],
+  "final": {
+    "a_b_benchmark": "PASS",
+    "assistant_mask": "PASS",
+    "batch_probe": "PASS",
+    "hf_backend": "PASS",
+    "lora_parity": "PASS",
+    "phase5c_a_code": "PASS",
+    "quantization_parity": "PASS",
+    "ready_for_phase5c_b_hf": true,
+    "ready_for_phase5c_b_unsloth": true,
+    "reason": "Unsloth 通过全部 parity gate：LoRA 252 层 + 43,646,976 参数与 HF bit-for-bit 一致；quantization 252 Linear4bit + NF4 + double_quant + bfloat16 完全一致；tokenizer signature 无 drift；assistant mask 公开路径校验通过；adapter save / reload / 推理完整可用；20-step benchmark 与 batch=1/2/4/8 probe 全部 PASS。相对 HF：训练速度 ~7% 提升，显存峰值降低 37%（6.478 vs 10.353 GiB allocated，6.676 vs 10.672 GiB reserved），batch=8 仍稳定（peak reserved 25.057 GiB，< 80% 上限 25.470 GiB）。",
+    "recommended_backend": "unsloth",
+    "recommended_batch_size": 8,
+    "recommended_gradient_accumulation_steps": 1,
+    "tokenizer_parity": "PASS",
+    "unsloth_env": "PASS",
+    "unsloth_runtime": "PASS"
+  },
+  "inference": {
+    "hf": {
+      "generated_char_count": 112,
+      "generated_token_count": 64,
+      "nonempty": true,
+      "preview": "基层党组织是党的组织体系的根基，是党在社会基层组织中的战斗堡垒，是党的全部工作和战斗力的基础。基层党组织是党在社会基层单位中的战斗堡垒，是党的全部工作和战斗力的基础。基层党组织是党在社会基层单位中的战斗堡垒，是党的全部工作和"
+    },
+    "unsloth": {
+      "generated_char_count": 104,
+      "generated_token_count": 64,
+      "nonempty": true,
+      "preview": "基层党组织是党的组织体系的根基，是党在社会基层组织中的战斗堡垒，是党的全部工作和战斗力的基础。基层党组织是党的组织体系的“神经末梢”，是党联系群众的“最后一公里”，是党在基层的“政治引领者”和“组织者”。基层"
+    }
+  },
+  "lora_parity": {
+    "hf": {
+      "all_params": 4761498624,
+      "alpha": 32,
+      "bias": "none",
+      "dropout": 0.05,
+      "lora_layers": 252,
+      "r": 16,
+      "target_modules": "all-linear",
+      "task_type": "CAUSAL_LM",
+      "trainable_params": 43646976,
+      "trainable_percentage": 0.9167
+    },
+    "parity": true,
+    "unsloth": {
+      "all_params": 4761498624,
+      "alpha": 32,
+      "bias": "none",
+      "dropout": 0.05,
+      "lora_layers": 252,
+      "r": 16,
+      "target_modules": "all-linear",
+      "task_type": "CAUSAL_LM",
+      "trainable_params": 43646976,
+      "trainable_percentage": 0.9167
+    }
+  },
+  "memory": {
+    "hf_peak_reserved_gib": 10.672,
+    "unsloth_peak_reserved_gib": 6.676,
+    "vram_reduction_gib": 3.996,
+    "vram_reduction_pct": 37.44
+  },
+  "model": {
+    "hf_pinned": true,
+    "name": "Qwen/Qwen3-8B",
+    "requested_revision": "main",
+    "resolved_revision": "b968826d9c46dd6066d109eabc6255188de91218",
+    "unsloth_pinned": true
+  },
+  "quantization_parity": {
+    "hf": {
+      "compute_dtype": "bfloat16",
+      "double_quant": true,
+      "linear4bit_modules": 252,
+      "load_in_4bit": true,
+      "quant_type": "nf4"
+    },
+    "parity": true,
+    "unsloth": {
+      "compute_dtype": "bfloat16",
+      "double_quant": true,
+      "linear4bit_modules": 252,
+      "load_in_4bit": true,
+      "quant_type": "nf4"
+    }
+  },
+  "regression_baseline": {
+    "added_tests": 20,
+    "pytest_after": "253 passed, 1 skipped",
+    "pytest_before": "233 passed, 1 skipped"
+  },
+  "smoke": {
+    "hf_1step_loss": 2.8873374462127686,
+    "unsloth_1step_loss": 2.6187498569488525,
+    "unsloth_1step_memory": {
+      "after_4bit_model": {
+        "allocated_bytes": 6130333696,
+        "free_bytes": 26146242560,
+        "reserved_bytes": 6207569920,
+        "total_bytes": 34190458880
+      },
+      "after_lora": {
+        "allocated_bytes": 6304921600,
+        "free_bytes": 25974276096,
+        "reserved_bytes": 6379536384,
+        "total_bytes": 34190458880
+      },
+      "after_trainer": {
+        "allocated_bytes": 6304921600,
+        "free_bytes": 25974276096,
+        "reserved_bytes": 6379536384,
+        "total_bytes": 34190458880
+      },
+      "before_model": {
+        "allocated_bytes": 8519680,
+        "free_bytes": 32345423872,
+        "reserved_bytes": 20971520,
+        "total_bytes": 34190458880
+      },
+      "peak_allocated_bytes": 6606393344,
+      "peak_allocated_gib": 6.153,
+      "peak_reserved_bytes": 6769606656,
+      "peak_reserved_gib": 6.305
+    },
+    "unsloth_1step_pass": true
+  },
+  "tests": {
+    "failed": 0,
+    "passed": 253,
+    "skipped": 1,
+    "test_count_new": 20,
+    "test_files": [
+      "tests/test_backend_abstraction.py"
+    ]
+  },
+  "tokenizer_parity": {
+    "assistant_only_loss_feasible": true,
+    "audit_signature": "4ac4fed6d76f2cddf5ee756990b7bd4dc40655f96e4c6be460dc3299e73651c0",
+    "audit_total_rows": 1303,
+    "coverage_2048": {
+      "candidate_max_length": 2048,
+      "fit_count": 1303,
+      "fit_ratio": 1.0,
+      "over_count": 0,
+      "over_ratio": 0.0
+    },
+    "drift_detected": false,
+    "equal": true,
+    "hf_env_signature": "4ac4fed6d76f2cddf5ee756990b7bd4dc40655f96e4c6be460dc3299e73651c0",
+    "max_diff_vs_hf_report": 0,
+    "prompt_prefix_mismatch_count": 0,
+    "report_max_total_tokens": 1672,
+    "report_mean": 182.62,
+    "report_median": 136.0,
+    "report_p95": 447.89999999999986,
+    "report_p99": 816.6000000000013,
+    "samples_over_2048": 0,
+    "thinking_markers": {
+      "reasoning_content": 0,
+      "think_close": 0,
+      "think_open": 0
+    },
+    "unsloth_env_signature": "4ac4fed6d76f2cddf5ee756990b7bd4dc40655f96e4c6be460dc3299e73651c0",
+    "zero_assistant_target_count": 0
+  }
+}

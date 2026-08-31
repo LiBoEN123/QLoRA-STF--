@@ -1,0 +1,180 @@
+{
+  "adapter": {
+    "files": [
+      "README.md",
+      "adapter_config.json",
+      "adapter_model.safetensors",
+      "chat_template.jinja",
+      "tokenizer.json",
+      "tokenizer_config.json"
+    ],
+    "path": "outputs\\phase5c-a\\unsloth\\adapter",
+    "saved": true
+  },
+  "assistant_mask": {
+    "checked_samples": 3,
+    "pass": true,
+    "samples": [
+      {
+        "mask_validation_pass": true,
+        "masked_tokens": 1,
+        "sample_id": null,
+        "sequence_length": 738,
+        "supervised_tokens": 737
+      },
+      {
+        "mask_validation_pass": true,
+        "masked_tokens": 1,
+        "sample_id": null,
+        "sequence_length": 99,
+        "supervised_tokens": 98
+      },
+      {
+        "mask_validation_pass": true,
+        "masked_tokens": 1,
+        "sample_id": null,
+        "sequence_length": 75,
+        "supervised_tokens": 74
+      }
+    ]
+  },
+  "backend": "unsloth",
+  "environment": {
+    "arch_list": [
+      "sm_75",
+      "sm_80",
+      "sm_86",
+      "sm_90",
+      "sm_100",
+      "sm_120"
+    ],
+    "bf16_supported": true,
+    "compute_capability": [
+      12,
+      0
+    ],
+    "cuda_available": true,
+    "device_count": 1,
+    "device_name": "NVIDIA GeForce RTX 5090",
+    "torch": "2.11.0+cu128",
+    "torch_cuda_version": "12.8",
+    "total_memory_bytes": 34190458880
+  },
+  "inference_smoke": {
+    "generated_char_count": 127,
+    "generated_token_count": 64,
+    "generation_nonempty": true,
+    "generation_preview": "基层党组织是指在**中国共产党**的组织体系中，**在基层单位中设立的党组织**。这些基层单位包括**农村、城市社区、机关、学校、企业、社会组织、社会组织、非公企业、社会组织、社会组织、社会组织、社会组织、社会组织、社会组织、社会组织、社会组织、社会组织",
+    "pass": true,
+    "prompt": "什么是基层党组织？"
+  },
+  "library_versions": {
+    "accelerate": "1.14.0",
+    "bitsandbytes": "0.50.1",
+    "datasets": "4.3.0",
+    "peft": "0.20.0",
+    "torch": "2.11.0+cu128",
+    "transformers": "5.5.0",
+    "triton": "3.7.1",
+    "trl": "0.24.0",
+    "unsloth": "2026.8.21",
+    "unsloth_zoo": "2026.8.15",
+    "xformers": "0.0.35"
+  },
+  "lora": {
+    "all_params": 4761498624,
+    "alpha": 32,
+    "bias": "none",
+    "dropout": 0.05,
+    "lora_layers": 252,
+    "r": 16,
+    "target_modules": "all-linear",
+    "task_type": "CAUSAL_LM",
+    "trainable_params": 43646976,
+    "trainable_percentage": 0.9167
+  },
+  "memory": {
+    "after_4bit_model": {
+      "allocated_bytes": 6130333696,
+      "free_bytes": 26146242560,
+      "reserved_bytes": 6207569920,
+      "total_bytes": 34190458880
+    },
+    "after_lora": {
+      "allocated_bytes": 6304921600,
+      "free_bytes": 25974276096,
+      "reserved_bytes": 6379536384,
+      "total_bytes": 34190458880
+    },
+    "after_trainer": {
+      "allocated_bytes": 6304921600,
+      "free_bytes": 25974276096,
+      "reserved_bytes": 6379536384,
+      "total_bytes": 34190458880
+    },
+    "before_model": {
+      "allocated_bytes": 8519680,
+      "free_bytes": 32345423872,
+      "reserved_bytes": 20971520,
+      "total_bytes": 34190458880
+    },
+    "peak_allocated_bytes": 6606393344,
+    "peak_allocated_gib": 6.153,
+    "peak_reserved_bytes": 6769606656,
+    "peak_reserved_gib": 6.305
+  },
+  "model": {
+    "load_revision": "b968826d9c46dd6066d109eabc6255188de91218",
+    "model_name": "Qwen/Qwen3-8B",
+    "requested_revision": "main",
+    "resolved_revision": null,
+    "revision_pinned": true
+  },
+  "phase5a_gate": {
+    "actual_max_tokens": 1672,
+    "audit_max_tokens": 1672,
+    "max_audit_over_total_tokens": 0,
+    "passed": true,
+    "reasons": [],
+    "report_max_tokens": 1672,
+    "samples_over_max_length": 0,
+    "selected_max_length": 2048
+  },
+  "quantization": {
+    "compute_dtype": "bfloat16",
+    "double_quant": true,
+    "linear4bit_modules": 252,
+    "load_in_4bit": true,
+    "quant_type": "nf4"
+  },
+  "smoke_samples": {
+    "p95_sample_id": "sft_c7598ab5db13721eaf7cae67",
+    "p95_total_tokens": 447,
+    "sample_ids": [
+      "sft_009e3a966c0521a184ee9433",
+      "sft_00a670418931c192c0fd15ea",
+      "sft_0106d6646d6e008dbcbb8810",
+      "sft_01539ba7ba024a3db1298d68",
+      "sft_01634e59720f4d9db9986731",
+      "sft_017bb9fd88183148c9412ff5",
+      "sft_01edc24df45ff20100578c06",
+      "sft_c7598ab5db13721eaf7cae67"
+    ],
+    "short_count": 7,
+    "total_selected": 8
+  },
+  "status": "PASS",
+  "training": {
+    "global_step": 1,
+    "grad_norm": null,
+    "gradient_accumulation_steps": 1,
+    "gradient_checkpointing": true,
+    "learning_rate": 0.0001,
+    "loss": 2.6187498569488525,
+    "loss_finite": true,
+    "max_length": 2048,
+    "max_steps": 1,
+    "packing": false,
+    "per_device_train_batch_size": 1
+  }
+}

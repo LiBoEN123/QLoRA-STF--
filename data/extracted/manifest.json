@@ -1,0 +1,114 @@
+{
+  "generated_at": "2026-08-14T07:04:22.703754+00:00",
+  "input_root": "/home/wabce94123/projects/QLoRA-STF-党建知识/data/raw",
+  "output_jsonl": "/home/wabce94123/projects/QLoRA-STF-党建知识/data/extracted/documents.jsonl",
+  "statistics": {
+    "total_files": 8,
+    "success_files": 1,
+    "failed_files": 0,
+    "skipped_files": 7,
+    "total_records": 5523
+  },
+  "source_types": {
+    "docx": 1
+  },
+  "warnings_summary": {
+    "unsupported_suffix": 7
+  },
+  "files": [
+    {
+      "source_path": "excel/.gitkeep",
+      "source_type": "unknown",
+      "status": "skipped",
+      "records": 0,
+      "sha256": "",
+      "warnings": [
+        "unsupported_suffix"
+      ],
+      "error_type": null,
+      "error": null
+    },
+    {
+      "source_path": "html/.gitkeep",
+      "source_type": "unknown",
+      "status": "skipped",
+      "records": 0,
+      "sha256": "",
+      "warnings": [
+        "unsupported_suffix"
+      ],
+      "error_type": null,
+      "error": null
+    },
+    {
+      "source_path": "markdown/.gitkeep",
+      "source_type": "unknown",
+      "status": "skipped",
+      "records": 0,
+      "sha256": "",
+      "warnings": [
+        "unsupported_suffix"
+      ],
+      "error_type": null,
+      "error": null
+    },
+    {
+      "source_path": "pdf/.gitkeep",
+      "source_type": "unknown",
+      "status": "skipped",
+      "records": 0,
+      "sha256": "",
+      "warnings": [
+        "unsupported_suffix"
+      ],
+      "error_type": null,
+      "error": null
+    },
+    {
+      "source_path": "qa/.gitkeep",
+      "source_type": "unknown",
+      "status": "skipped",
+      "records": 0,
+      "sha256": "",
+      "warnings": [
+        "unsupported_suffix"
+      ],
+      "error_type": null,
+      "error": null
+    },
+    {
+      "source_path": "text/.gitkeep",
+      "source_type": "unknown",
+      "status": "skipped",
+      "records": 0,
+      "sha256": "",
+      "warnings": [
+        "unsupported_suffix"
+      ],
+      "error_type": null,
+      "error": null
+    },
+    {
+      "source_path": "word/.gitkeep",
+      "source_type": "unknown",
+      "status": "skipped",
+      "records": 0,
+      "sha256": "",
+      "warnings": [
+        "unsupported_suffix"
+      ],
+      "error_type": null,
+      "error": null
+    },
+    {
+      "source_path": "基层党务（试用版）(1).docx",
+      "source_type": "docx",
+      "status": "success",
+      "records": 5523,
+      "sha256": "8e85fda5e966bfeb6e1c0e4c1e81eed01cd42bcc80952487539060777a769075",
+      "warnings": [],
+      "error_type": null,
+      "error": null
+    }
+  ]
+}

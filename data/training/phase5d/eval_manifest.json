@@ -1,0 +1,50 @@
+{
+  "assistant_only_loss": true,
+  "backend": "unsloth",
+  "best_adapter_path": "outputs\\phase5c-b\\best_adapter",
+  "best_adapter_signature_sha256": "47b7005619f52ae7093c277cd46b1e3c98164f2131073debea2e7170547dc9be",
+  "best_adapter_tensor_signature": {
+    "file_path": "outputs\\phase5c-b\\best_adapter\\adapter_model.safetensors",
+    "n_tensors": 504,
+    "signature": "47b7005619f52ae7093c277cd46b1e3c98164f2131073debea2e7170547dc9be"
+  },
+  "do_sample": false,
+  "enable_thinking": false,
+  "eval_protocol_signature": "a7122ab5ebdb522c43f3bcfc5446571e747952e6d753327cb864c2949418568c",
+  "expected_lora_layers": 252,
+  "generation_max_new_tokens": 1610,
+  "git": {
+    "branch": "main",
+    "commit": "8f0118c7d4c84a645a6ddab227386ee5f6b0f5a0",
+    "dirty": true
+  },
+  "max_reference_assistant_tokens": 1546,
+  "metrics": {
+    "char_f1": "normalize_for_eval + Counter overlap",
+    "exact_match": "normalize_for_eval == normalize_for_eval",
+    "rouge_l_f1": "normalize_for_eval + LCS / (|p|+|r|)"
+  },
+  "model_name": "Qwen/Qwen3-8B",
+  "model_revision": "b968826d9c46dd6066d109eabc6255188de91218",
+  "near_dup_threshold": 0.95,
+  "normalization": {
+    "deterministic": true,
+    "method": "NFKC + strip + collapse whitespace; lexical via unicodedata.category P*/S*"
+  },
+  "paired_metrics_tolerance": 1e-12,
+  "protocol_frozen": true,
+  "quantization": {
+    "compute_dtype": "bfloat16",
+    "double_quant": true,
+    "max_length": 2048,
+    "quant_type": "nf4"
+  },
+  "resume_save_every": 5,
+  "seed": 42,
+  "test_count": 79,
+  "test_jsonl_path": "data\\sft\\test.jsonl",
+  "test_jsonl_sha256": "b77a51613ebe6b75d2d7f9e676a0f41adfd9e6c5093da19651076967122f5db8",
+  "test_record_count": 79,
+  "test_sample_id_signature": "e510cf41fac8d245c4219e86f5ca02e46ad15f6638ba388d67c86c79b49ce587",
+  "tokenizer_signature": "4ac4fed6d76f2cddf5ee756990b7bd4dc40655f96e4c6be460dc3299e73651c0"
+}

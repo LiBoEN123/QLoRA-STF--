@@ -1,0 +1,37 @@
+{
+  "accelerate": "1.14.0",
+  "arch_list": [
+    "sm_75",
+    "sm_80",
+    "sm_86",
+    "sm_90",
+    "sm_100",
+    "sm_120"
+  ],
+  "bf16_supported": true,
+  "bitsandbytes": "0.50.1",
+  "compute_capability": [
+    12,
+    0
+  ],
+  "cuda_available": true,
+  "cuda_version": "12.8",
+  "datasets": "4.3.0",
+  "device_name": "NVIDIA GeForce RTX 5090",
+  "peft": "0.20.0",
+  "pip_check": {
+    "passed": true,
+    "returncode": 0,
+    "stderr": "",
+    "stdout": "No broken requirements found."
+  },
+  "torch": "2.11.0+cu128",
+  "total_memory_gib": 31.842,
+  "transformers": "5.5.0",
+  "triton": "3.7.1",
+  "trl": "0.24.0",
+  "unsloth": "2026.8.21",
+  "unsloth_zoo": "2026.8.15",
+  "venv": "C:\\Users\\abai\\QLoRA-STF--\\.venv-unsloth",
+  "xformers": "0.0.35"
+}

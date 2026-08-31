@@ -1,0 +1,18 @@
+{
+  "best_adapter_path": "outputs\\phase5c-b\\best_adapter\\adapter_model.safetensors",
+  "best_signature": {
+    "file_path": "outputs\\phase5c-b\\best_adapter\\adapter_model.safetensors",
+    "n_tensors": 504,
+    "signature": "47b7005619f52ae7093c277cd46b1e3c98164f2131073debea2e7170547dc9be"
+  },
+  "checkpoint_path": "outputs\\phase5c-b\\checkpoints\\checkpoint-288\\adapter_model.safetensors",
+  "checkpoint_signature": {
+    "file_path": "outputs\\phase5c-b\\checkpoints\\checkpoint-288\\adapter_model.safetensors",
+    "n_tensors": 504,
+    "signature": "47b7005619f52ae7093c277cd46b1e3c98164f2131073debea2e7170547dc9be"
+  },
+  "equal": true,
+  "n_tensors": 504,
+  "prefer_dtype": "bfloat16",
+  "value_match": true
+}

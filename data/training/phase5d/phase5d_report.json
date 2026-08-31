@@ -1,0 +1,89 @@
+{
+  "base_aggregate": {
+    "empty_generation_rate": 0.0,
+    "max_token_hit_rate": 0.0,
+    "mean_char_f1": 0.2702,
+    "mean_exact_match": 0.0,
+    "mean_generated_tokens": 693.62,
+    "mean_rouge_l_f1": 0.1447,
+    "n": 79
+  },
+  "base_test_loss": 1.9303041916661194,
+  "base_test_perplexity": 6.891606291964793,
+  "best_adapter_signature": {
+    "file_path": "outputs\\phase5c-b\\best_adapter\\adapter_model.safetensors",
+    "n_tensors": 504,
+    "signature": "47b7005619f52ae7093c277cd46b1e3c98164f2131073debea2e7170547dc9be"
+  },
+  "code": "PASS",
+  "finetuned_aggregate": {
+    "empty_generation_rate": 0.0,
+    "max_token_hit_rate": 0.1139,
+    "mean_char_f1": 0.3753,
+    "mean_exact_match": 0.0,
+    "mean_generated_tokens": 278.41,
+    "mean_rouge_l_f1": 0.2626,
+    "n": 79
+  },
+  "finetuned_test_loss": 1.2240790855394719,
+  "finetuned_test_perplexity": 3.4010325800845704,
+  "gate": {
+    "code": "PASS",
+    "ready_for_phase5e": true,
+    "reasons": []
+  },
+  "generation_max_new_tokens": 1610,
+  "git": {
+    "branch": "main",
+    "commit": "8f0118c7d4c84a645a6ddab227386ee5f6b0f5a0",
+    "dirty": true
+  },
+  "leakage_audit": {
+    "full_message_overlap_count": 0,
+    "is_clean": true,
+    "near_duplicate_count": 1,
+    "near_duplicate_top": [
+      {
+        "best_match_sample_id": "sft_fe2b86a13dca6aabbd14b09c",
+        "best_match_split": "train",
+        "similarity": 0.967,
+        "test_sample_id": "sft_d236a4e8717a81cc0173a247"
+      }
+    ],
+    "prompt_overlap_count": 0,
+    "sample_id_overlap_train": 0,
+    "sample_id_overlap_validation": 0
+  },
+  "paired_char_f1": {
+    "base_wins": 26,
+    "finetuned_wins": 53,
+    "mean_delta": 0.1051,
+    "n": 79,
+    "regression_rate": 0.3291,
+    "tie_rate": 0.0,
+    "ties": 0,
+    "tolerance": 1e-12,
+    "win_rate": 0.6709
+  },
+  "paired_metrics_tolerance": 1e-12,
+  "paired_rouge_l_f1": {
+    "base_wins": 18,
+    "finetuned_wins": 61,
+    "mean_delta": 0.1178,
+    "n": 79,
+    "regression_rate": 0.2278,
+    "tie_rate": 0.0,
+    "ties": 0,
+    "tolerance": 1e-12,
+    "win_rate": 0.7722
+  },
+  "ready_for_phase5e": true,
+  "reasons": [],
+  "runtime_code_dirty": true,
+  "runtime_code_head": "8f0118c7d4c84a645a6ddab227386ee5f6b0f5a0",
+  "status": "PASS",
+  "test_count": 79,
+  "test_loss_improvement": 0.7062251061266476,
+  "test_loss_improvement_pct": 36.58620797570137,
+  "tokenizer_signature": "4ac4fed6d76f2cddf5ee756990b7bd4dc40655f96e4c6be460dc3299e73651c0"
+}

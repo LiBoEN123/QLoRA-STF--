@@ -1,0 +1,13 @@
+{
+  "cap_hit_count": 9,
+  "empty_count": 0,
+  "empty_generation_rate": 0.0,
+  "max_token_hit_rate": 0.1139,
+  "mean_char_f1": 0.3753,
+  "mean_exact_match": 0.0,
+  "mean_generated_tokens": 278.41,
+  "mean_rouge_l_f1": 0.2626,
+  "n": 79,
+  "test_loss": 1.2240790855394719,
+  "test_perplexity": 3.4010325800845704
+}

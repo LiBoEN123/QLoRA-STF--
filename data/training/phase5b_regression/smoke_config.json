@@ -1,0 +1,59 @@
+{
+  "lora": {
+    "alpha": 32,
+    "bias": "none",
+    "dropout": 0.05,
+    "r": 16,
+    "target_modules": "all-linear",
+    "task_type": "CAUSAL_LM"
+  },
+  "max_length": 2048,
+  "model": {
+    "load_revision": "main",
+    "model_name": "Qwen/Qwen3-8B",
+    "requested_revision": "main",
+    "resolved_revision": null,
+    "revision_pinned": false
+  },
+  "quantization": {
+    "compute_dtype": "bfloat16",
+    "double_quant": true,
+    "quant_type": "nf4"
+  },
+  "revision": "main",
+  "smoke": {
+    "inference_max_new_tokens": 64,
+    "inference_prompt": "什么是基层党组织？",
+    "p95_sample_id": "sft_c7598ab5db13721eaf7cae67",
+    "p95_total_tokens": 447,
+    "selected_sample_ids": [
+      "sft_009e3a966c0521a184ee9433",
+      "sft_00a670418931c192c0fd15ea",
+      "sft_0106d6646d6e008dbcbb8810",
+      "sft_01539ba7ba024a3db1298d68",
+      "sft_01634e59720f4d9db9986731",
+      "sft_017bb9fd88183148c9412ff5",
+      "sft_01edc24df45ff20100578c06",
+      "sft_c7598ab5db13721eaf7cae67"
+    ],
+    "short_count": 7,
+    "target_count": 8
+  },
+  "training": {
+    "assistant_only_loss": true,
+    "bf16": true,
+    "eval_strategy": "no",
+    "fp16": false,
+    "gradient_accumulation_steps": 1,
+    "gradient_checkpointing": true,
+    "learning_rate": 0.0001,
+    "logging_steps": 1,
+    "max_steps": 1,
+    "packing": false,
+    "per_device_train_batch_size": 1,
+    "report_to": "none",
+    "save_strategy": "no",
+    "seed": 42,
+    "warmup_steps": 0
+  }
+}

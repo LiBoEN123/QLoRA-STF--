@@ -1,0 +1,26 @@
+{
+  "checked_samples": [
+    {
+      "masked_tokens": 81,
+      "prompt_len": 14,
+      "sample_id": "sft_01adf272326eb000d3500d38",
+      "sequence_length": 95,
+      "supervised_tokens": 81
+    },
+    {
+      "masked_tokens": 116,
+      "prompt_len": 18,
+      "sample_id": "sft_6e90660fe98a92949268852e",
+      "sequence_length": 134,
+      "supervised_tokens": 116
+    },
+    {
+      "masked_tokens": 833,
+      "prompt_len": 17,
+      "sample_id": "sft_f974d1a86d81aadc47114101",
+      "sequence_length": 850,
+      "supervised_tokens": 833
+    }
+  ],
+  "pass": true
+}

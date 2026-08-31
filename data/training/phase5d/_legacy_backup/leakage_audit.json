@@ -1,0 +1,16 @@
+{
+  "full_message_overlap_count": 0,
+  "is_clean": true,
+  "near_duplicate_count": 1,
+  "near_duplicate_top": [
+    {
+      "best_match_sample_id": "sft_fe2b86a13dca6aabbd14b09c",
+      "best_match_split": "train",
+      "similarity": 0.967,
+      "test_sample_id": "sft_d236a4e8717a81cc0173a247"
+    }
+  ],
+  "prompt_overlap_count": 0,
+  "sample_id_overlap_train": 0,
+  "sample_id_overlap_validation": 0
+}
