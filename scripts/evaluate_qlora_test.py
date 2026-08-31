@@ -86,6 +86,12 @@ from data_pipeline.training.phase5c_b import (  # noqa: E402
     compute_adapter_signature,
     verify_best_adapter_matches_checkpoint,
 )
+from data_pipeline.training.phase5d import (  # noqa: E402
+    _prompt_messages as _phase5d_prompt_messages,
+    assistant_span_from_prefix,
+    compute_eval_protocol_signature,
+    verify_frozen_manifest,
+)
 from data_pipeline.utils import (  # noqa: E402
     atomic_write_json,
     atomic_write_jsonl,
@@ -107,6 +113,9 @@ DEFAULT_OUTPUT_DIR = Path("data/training/phase5d")
 EXPECTED_LORA_LAYERS = 252
 EXPECTED_TEST_COUNT = 79
 MAX_SEQ_LENGTH = 2048
+PAIRED_TOLERANCE = 1e-12
+RESUME_SAVE_EVERY = 5
+NEAR_DUP_THRESHOLD = 0.95
 
 
 # ---------------------------------------------------------------------------
@@ -162,12 +171,12 @@ def _reference_assistant(messages: List[Dict[str, Any]]) -> str:
 
 
 def _prompt_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, str]]:
-    """reference assistant 之前的 messages。"""
-    return [
-        {"role": str(m.get("role", "")), "content": str(m.get("content", ""))}
-        for m in messages
-        if m.get("role") != "assistant"
-    ] or messages[:-1]
+    """reference assistant 之前的 messages。
+
+    委托给 ``phase5d._prompt_messages``，保持单一权威语义：
+    保留除最后一条之外的全部消息；不要“删除所有 assistant”。
+    """
+    return _phase5d_prompt_messages(messages)
 
 
 def _apply_chat_template_ids(
@@ -217,15 +226,20 @@ def _per_sample_assistant_mask(
 ) -> Dict[str, Any]:
     """校验 assistant-only mask 是否真正生效。
 
-    Qwen3 的 chat template **不包含** ``{% generation %}`` 关键字，因此
-    ``return_assistant_tokens_mask=True`` 会返回全 0。这里使用与
-    Phase 5C-B 一致的 prompt-prefix 切片法：
+    严格使用 prompt-prefix 切片法（与 Phase 5C-B 完全一致）：
 
-    1. ``prompt_ids`` = tokenize(messages[:-1] + add_generation_prompt=True)；
-    2. ``full_ids`` = tokenize(messages + add_generation_prompt=False)；
-    3. 验证 ``full_ids[:len(prompt_ids)] == prompt_ids``；
-    4. ``prompt_len = len(prompt_ids)``；
-    5. ``masked_tokens = supervised_tokens = full_ids 长度 - prompt 长度``。
+    - ``prompt_ids`` = ``apply_chat_template(msgs[:-1], add_generation_prompt=True)``
+    - ``full_ids`` = ``apply_chat_template(msgs, add_generation_prompt=False)``
+    - 验证 ``full_ids[:len(prompt_ids)] == prompt_ids`` ⇒ 否则 **raise**
+      ``ChatTemplatePrefixMismatch``，不允许静默 fallback。
+    - ``masked_tokens = len(prompt_ids)``（prompt 部分 ⇒ ``labels=-100``）
+    - ``supervised_tokens = len(full_ids) - len(prompt_ids)``（assistant 部分）
+
+    Invariants:
+
+    - ``masked_tokens + supervised_tokens == sequence_length``
+    - ``masked_tokens > 0`` 且 ``supervised_tokens > 0``
+    - ``prefix_equal == True``
     """
     msgs = record["messages"]
     prompt_ids = _apply_chat_template_ids(
@@ -235,20 +249,26 @@ def _per_sample_assistant_mask(
         tokenizer, msgs, add_generation_prompt=False,
     )
     seq_len = len(full_ids)
-    if not (len(prompt_ids) <= len(full_ids)
-            and list(full_ids[:len(prompt_ids)]) == list(prompt_ids)):
-        # 退化情况：prompt 与 full 前缀不一致。仍记录但保守报 masked=0
-        prompt_len = 0
-        masked = 0
-    else:
-        prompt_len = len(prompt_ids)
-        masked = seq_len - prompt_len
+    span = assistant_span_from_prefix(prompt_ids, full_ids)
+    masked = int(span["masked_tokens"])
+    sup = int(span["supervised_tokens"])
+    if masked <= 0 or sup <= 0:
+        raise ValueError(
+            f"assistant span invalid: masked={masked} sup={sup} seq_len={seq_len} "
+            f"sample_id={record.get('sample_id', '')}"
+        )
+    if masked + sup != seq_len:
+        raise ValueError(
+            f"masked+supervised != seq_len: {masked}+{sup} != {seq_len} "
+            f"sample_id={record.get('sample_id', '')}"
+        )
     return {
         "sample_id": record.get("sample_id", ""),
-        "sequence_length": seq_len,
+        "sequence_length": int(seq_len),
+        "prompt_len": int(span["prompt_len"]),
         "masked_tokens": int(masked),
-        "supervised_tokens": int(masked),
-        "prompt_len": int(prompt_len),
+        "supervised_tokens": int(sup),
+        "prefix_equal": True,
     }
 
 
@@ -382,7 +402,7 @@ def _run(args: argparse.Namespace, log: Any) -> int:
         return 10
 
     # ------------------------------------------------------------------
-    # Step 3: best adapter gate (signature + LoRA layers)
+    # Step 3: best adapter gate (signature + LoRA layers + checkpoint match)
     # ------------------------------------------------------------------
     best_st = args.best_adapter_dir / "adapter_model.safetensors"
     if not best_st.exists():
@@ -420,6 +440,37 @@ def _run(args: argparse.Namespace, log: Any) -> int:
             "[adapter] n_tensors=%d != %d; will verify after load",
             best_sig.n_tensors, EXPECTED_LORA_LAYERS * 2,
         )
+
+    # ------------------------------------------------------------------
+    # Step 3b: tensor-level verify best_adapter == checkpoint-288
+    # ------------------------------------------------------------------
+    ckpt_st = args.best_checkpoint_dir / "adapter_model.safetensors"
+    if not ckpt_st.exists():
+        log.error("[adapter] checkpoint missing: %s", ckpt_st)
+        atomic_write_json(output_dir / "phase5d_report.json", {
+            "status": "BLOCKED",
+            "code": "BEST_CHECKPOINT_INVALID",
+            "reason": f"missing {ckpt_st}",
+        })
+        return 10
+
+    log.info("[adapter] verifying best_adapter == checkpoint-288 ...")
+    verify = verify_best_adapter_matches_checkpoint(
+        best_st, ckpt_st, torch=torch,
+    )
+    atomic_write_json(output_dir / "best_adapter_checkpoint_match.json", verify)
+    if not verify.get("equal"):
+        log.error("[adapter] BEST_ADAPTER_MISMATCH: %s", verify)
+        atomic_write_json(output_dir / "phase5d_report.json", {
+            "status": "BLOCKED",
+            "code": "BEST_ADAPTER_MISMATCH",
+            "verify": verify,
+        })
+        return 10
+    log.info(
+        "[adapter] BEST_ADAPTER_MATCHES_CHECKPOINT_288 = TRUE (n_tensors=%d)",
+        verify.get("n_tensors"),
+    )
 
     # ------------------------------------------------------------------
     # Step 4: test fingerprint + leakage audit
@@ -470,72 +521,103 @@ def _run(args: argparse.Namespace, log: Any) -> int:
     )
 
     # ------------------------------------------------------------------
-    # Step 6: write frozen eval_manifest
+    # Step 6: write frozen eval_manifest (with semantic protocol signature)
     # ------------------------------------------------------------------
     manifest_path = output_dir / "eval_manifest.json"
+    candidate_payload = {
+        "git": {
+            "branch": "main",
+            "commit": git_commit,
+            "dirty": git_dirty,
+        },
+        "backend": "unsloth",
+        "model_name": DEFAULT_MODEL_NAME,
+        "model_revision": DEFAULT_REVISION,
+        "quantization": {
+            "quant_type": "nf4",
+            "compute_dtype": "bfloat16",
+            "double_quant": True,
+            "max_length": MAX_SEQ_LENGTH,
+        },
+        "best_adapter_path": str(args.best_adapter_dir),
+        "best_adapter_tensor_signature": best_sig.to_dict(),
+        "best_adapter_signature_sha256": best_sig.signature,
+        "tokenizer_signature": EXPECTED_TOKENIZER_SIGNATURE,
+        "test_jsonl_path": str(args.test_jsonl),
+        "test_jsonl_sha256": test_fp.file_sha256,
+        "test_count": test_fp.record_count,
+        "test_sample_id_signature": test_fp.sample_id_signature,
+        "test_record_count": test_fp.record_count,
+        "max_reference_assistant_tokens": int(max_ref_tokens),
+        "generation_max_new_tokens": int(generation_max_new_tokens),
+        "assistant_only_loss": True,
+        "enable_thinking": False,
+        "do_sample": False,
+        "normalization": {
+            "method": "NFKC + strip + collapse whitespace; lexical via unicodedata.category P*/S*",
+            "deterministic": True,
+        },
+        "metrics": {
+            "char_f1": "normalize_for_eval + Counter overlap",
+            "rouge_l_f1": "normalize_for_eval + LCS / (|p|+|r|)",
+            "exact_match": "normalize_for_eval == normalize_for_eval",
+        },
+        "seed": 42,
+        "expected_lora_layers": EXPECTED_LORA_LAYERS,
+        "paired_metrics_tolerance": PAIRED_TOLERANCE,
+        "resume_save_every": RESUME_SAVE_EVERY,
+        "near_dup_threshold": NEAR_DUP_THRESHOLD,
+    }
+    expected_signature = compute_eval_protocol_signature(candidate_payload)
+
     if manifest_path.exists():
         try:
             existing = json.loads(manifest_path.read_text(encoding="utf-8"))
-            if not existing.get("protocol_frozen"):
-                log.error("[manifest] existing manifest not protocol_frozen=True")
-                return 10
-            # Compare generation_max_new_tokens + tokenizer sig + test sample_id sig
-            if existing.get("generation_max_new_tokens") != generation_max_new_tokens:
-                log.error("[manifest] EVAL_PROTOCOL_MISMATCH: generation_max_new_tokens drift")
-                return 10
-            if existing.get("tokenizer_signature") != EXPECTED_TOKENIZER_SIGNATURE:
-                log.error("[manifest] EVAL_PROTOCOL_MISMATCH: tokenizer_signature drift")
-                return 10
-            if existing.get("test_sample_id_signature") != test_fp.sample_id_signature:
-                log.error("[manifest] EVAL_PROTOCOL_MISMATCH: test_sample_id_signature drift")
-                return 10
-            log.info("[manifest] existing frozen manifest is consistent; reuse")
+            existing_sig = existing.get("eval_protocol_signature")
+            if existing.get("protocol_frozen") and existing_sig is None:
+                # Legacy manifest predates signature scheme. Forward-migrate.
+                log.warning(
+                    "[manifest] existing frozen manifest predates eval_protocol_signature; "
+                    "forward-migrating with new semantic fields"
+                )
+                backup_path = manifest_path.with_suffix(
+                    ".legacy.{}.json".format(int(time.time()))
+                )
+                backup_path.write_text(
+                    manifest_path.read_text(encoding="utf-8"),
+                    encoding="utf-8",
+                )
+                log.info("[manifest] backed up legacy manifest to %s", backup_path)
+                write_eval_manifest(manifest_path, payload=candidate_payload, logger=log)
+            else:
+                ok, reasons = verify_frozen_manifest(
+                    existing,
+                    expected_tokenizer_signature=EXPECTED_TOKENIZER_SIGNATURE,
+                    expected_test_sample_id_signature=test_fp.sample_id_signature,
+                    expected_generation_max_new_tokens=generation_max_new_tokens,
+                    expected_eval_protocol_signature=expected_signature,
+                )
+                if not ok:
+                    log.error("[manifest] EVAL_PROTOCOL_MISMATCH: %s", reasons)
+                    atomic_write_json(output_dir / "phase5d_report.json", {
+                        "status": "BLOCKED",
+                        "code": "EVAL_PROTOCOL_MISMATCH",
+                        "reasons": reasons,
+                        "expected_signature": expected_signature,
+                        "existing_signature": existing_sig,
+                    })
+                    return 10
+                log.info(
+                    "[manifest] existing frozen manifest is consistent; reuse (sig=%s)",
+                    existing_sig[:16],
+                )
         except Exception as e:
             log.error("[manifest] failed to parse existing manifest: %s", e)
             return 10
     else:
-        manifest_payload = {
-            "git": {
-                "branch": "main",
-                "commit": git_commit,
-                "dirty": git_dirty,
-            },
-            "backend": "unsloth",
-            "model_name": DEFAULT_MODEL_NAME,
-            "model_revision": DEFAULT_REVISION,
-            "quantization": {
-                "quant_type": "nf4",
-                "compute_dtype": "bfloat16",
-                "double_quant": True,
-                "max_length": MAX_SEQ_LENGTH,
-            },
-            "best_adapter_path": str(args.best_adapter_dir),
-            "best_adapter_tensor_signature": best_sig.to_dict(),
-            "best_adapter_signature_sha256": best_sig.signature,
-            "tokenizer_signature": EXPECTED_TOKENIZER_SIGNATURE,
-            "test_jsonl_path": str(args.test_jsonl),
-            "test_jsonl_sha256": test_fp.file_sha256,
-            "test_count": test_fp.record_count,
-            "test_sample_id_signature": test_fp.sample_id_signature,
-            "test_record_count": test_fp.record_count,
-            "max_reference_assistant_tokens": int(max_ref_tokens),
-            "generation_max_new_tokens": int(generation_max_new_tokens),
-            "assistant_only_loss": True,
-            "enable_thinking": False,
-            "do_sample": False,
-            "normalization": {
-                "method": "NFKC + strip + collapse whitespace; lexical via unicodedata.category P*/S*",
-                "deterministic": True,
-            },
-            "metrics": {
-                "char_f1": "normalize_for_eval + Counter overlap",
-                "rouge_l_f1": "normalize_for_eval + LCS / (|p|+|r|)",
-                "exact_match": "normalize_for_eval == normalize_for_eval",
-            },
-            "seed": 42,
-            "expected_lora_layers": EXPECTED_LORA_LAYERS,
-        }
-        write_eval_manifest(manifest_path, payload=manifest_payload, logger=log)
+        write_eval_manifest(manifest_path, payload=candidate_payload, logger=log)
+        log.info("[manifest] wrote frozen eval_manifest with signature=%s",
+                 expected_signature[:16])
 
     # ------------------------------------------------------------------
     # Step 7: assistant mask sanity (3 samples)
@@ -548,14 +630,21 @@ def _run(args: argparse.Namespace, log: Any) -> int:
         info = _per_sample_assistant_mask(tokenizer, r)
         mask_results.append(info)
         log.info(
-            "[mask] sample_id=%s seq_len=%d masked=%d supervised=%d",
-            info["sample_id"], info["sequence_length"], info["masked_tokens"], info["supervised_tokens"],
+            "[mask] sample_id=%s seq_len=%d prompt_len=%d masked=%d supervised=%d prefix_equal=%s",
+            info["sample_id"], info["sequence_length"], info["prompt_len"],
+            info["masked_tokens"], info["supervised_tokens"], info["prefix_equal"],
         )
         if info["sequence_length"] > MAX_SEQ_LENGTH:
             log.error("[mask] TEST_ASSISTANT_MASK_FAIL: sequence_length > %d", MAX_SEQ_LENGTH)
             return 10
+        if not info["prefix_equal"]:
+            log.error("[mask] TEST_ASSISTANT_MASK_FAIL: prefix_equal=False")
+            return 10
         if info["masked_tokens"] <= 0 or info["supervised_tokens"] <= 0:
             log.error("[mask] TEST_ASSISTANT_MASK_FAIL: masked/supervised <= 0")
+            return 10
+        if info["masked_tokens"] + info["supervised_tokens"] != info["sequence_length"]:
+            log.error("[mask] TEST_ASSISTANT_MASK_FAIL: masked+supervised != seq_len")
             return 10
 
     atomic_write_json(output_dir / "test_assistant_mask_check.json", {
@@ -590,23 +679,53 @@ def _run(args: argparse.Namespace, log: Any) -> int:
     # Step 9: Build per-sample result state from existing predictions (resume)
     # ------------------------------------------------------------------
     pred_path = output_dir / "test_predictions.jsonl"
-    existing_preds: Dict[str, Dict[str, Any]] = {}
+    test_sample_ids = set(str(r["sample_id"]) for r in test_records)
+    test_records_by_id = {str(r["sample_id"]): r for r in test_records}
+
+    state: Dict[str, Dict[str, Any]] = {}
+    base_state: Dict[str, Dict[str, Any]] = {}
+    ft_state: Dict[str, Dict[str, Any]] = {}
     if args.resume and pred_path.exists():
-        for line in pred_path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            try:
-                rec = json.loads(line)
-                existing_preds[rec["sample_id"]] = rec
-            except Exception:
-                pass
-        log.info("[resume] loaded %d existing predictions", len(existing_preds))
+        try:
+            base_state = _load_prediction_state(
+                pred_path, test_sample_ids, test_records_by_id, side="base",
+            )
+            ft_state = _load_prediction_state(
+                pred_path, test_sample_ids, test_records_by_id, side="finetuned",
+            )
+            log.info(
+                "[resume] loaded BASE=%d FINETUNED=%d existing predictions",
+                len(base_state), len(ft_state),
+            )
+        except RuntimeError as e:
+            log.error("[resume] %s", e)
+            atomic_write_json(output_dir / "phase5d_report.json", {
+                "status": "BLOCKED",
+                "code": "RESUME_PREDICTION_MISMATCH",
+                "reason": str(e),
+            })
+            return 20
+        # Merge base + finetuned into a single state dict
+        for sid in test_sample_ids:
+            state[sid] = {"sample_id": sid}
+            if sid in base_state:
+                state[sid].update(base_state[sid])
+            if sid in ft_state:
+                state[sid].update(ft_state[sid])
+        # Also keep prompt_messages and reference
+        for r in test_records:
+            sid = str(r["sample_id"])
+            state.setdefault(sid, {"sample_id": sid})
+            state[sid]["prompt_messages"] = _phase5d_prompt_messages(r["messages"])
+            state[sid]["reference"] = _reference_assistant(r["messages"])
 
     # ------------------------------------------------------------------
     # Step 10: BASE eval (loss + generation)
     # ------------------------------------------------------------------
     base_test_loss = float("nan")
     base_test_ppl = float("nan")
+    base_runtime = 0.0
+    base_complete = bool(args.finetuned_only)  # if only running FT, BASE is unchanged
     base_per_sample: List[Dict[str, Any]] = []
     if not args.finetuned_only:
         log.info("[base] loading BASE Qwen3-8B 4-bit...")
@@ -626,38 +745,52 @@ def _run(args: argparse.Namespace, log: Any) -> int:
             log.error("[base] BASE_NOT_4BIT")
             return 30
 
-        # Loss
+        # Loss — 必须 79/79 全部 finite；不允许静默 skip。
         log.info("[base] computing teacher-forced assistant-only loss on %d samples...", len(test_records))
         t0 = time.time()
         total_loss = 0.0
         total_sup = 0
-        loss_n = 0
+        bad_loss: List[str] = []
         for r in test_records:
             loss, sup = _assistant_only_loss(base_model, base_tokenizer, r, base_model.device, torch)
-            if math.isfinite(loss) and sup > 0:
-                total_loss += loss * sup
-                total_sup += sup
-                loss_n += 1
+            if not (math.isfinite(loss) and sup > 0):
+                bad_loss.append(
+                    f"{r.get('sample_id', '?')}: loss={loss} sup={sup}"
+                )
+                continue
+            total_loss += loss * sup
+            total_sup += sup
         base_runtime = time.time() - t0
         if total_sup > 0:
             base_test_loss = total_loss / total_sup
             base_test_ppl = float(math.exp(base_test_loss)) if math.isfinite(base_test_loss) else float("nan")
         log.info(
-            "[base] loss PASS  loss=%.6f ppl=%.6f sup_tokens=%d runtime=%.1fs",
+            "[base] loss  loss=%.6f ppl=%.6f sup_tokens=%d runtime=%.1fs",
             base_test_loss, base_test_ppl, total_sup, base_runtime,
         )
+        if bad_loss:
+            log.error("[base] TEST_LOSS_INCOMPLETE: %s", bad_loss[:5])
+            atomic_write_json(output_dir / "phase5d_report.json", {
+                "status": "BLOCKED",
+                "code": "TEST_LOSS_INCOMPLETE",
+                "stage": "base",
+                "bad_samples": bad_loss,
+            })
+            return 30
         if not math.isfinite(base_test_loss):
             log.error("[base] BASE_TEST_LOSS_NON_FINITE")
             return 30
 
         # Generation
-        log.info("[base] generating 79/79...")
+        log.info("[base] generating %d/%d...", len(test_records), len(test_records))
         for idx, r in enumerate(test_records):
             sid = r["sample_id"]
-            if sid in existing_preds and existing_preds[sid].get("base_generation") is not None:
-                base_per_sample.append(existing_preds[sid])
+            existing = state.get(sid, {})
+            if existing.get("base_generation") is not None:
+                base_per_sample.append({k: v for k, v in existing.items()
+                                        if k.startswith("base_") or k in {"sample_id", "prompt_messages", "reference"}})
                 continue
-            prompt_msgs = _prompt_messages(r["messages"])
+            prompt_msgs = _phase5d_prompt_messages(r["messages"])
             ref = _reference_assistant(r["messages"])
             text, n_new, hit_cap = _greedy_generate(
                 base_model, base_tokenizer, prompt_msgs,
@@ -679,12 +812,17 @@ def _run(args: argparse.Namespace, log: Any) -> int:
                 "base_rouge_l_f1": round(base_rl, 6),
             }
             base_per_sample.append(entry)
+            # merge into state, atomic save every RESUME_SAVE_EVERY samples
+            _merge_side_state(state, [entry], side="base")
+            if (idx + 1) % RESUME_SAVE_EVERY == 0 or (idx + 1) == len(test_records):
+                _save_state(pred_path, state)
+                log.info("[base] saved %d/%d to predictions", idx + 1, len(test_records))
             if (idx + 1) % 10 == 0 or idx == 0 or (idx + 1) == len(test_records):
                 log.info("[base] generation %d/%d", idx + 1, len(test_records))
 
-        # Save progress
-        _dump_predictions(pred_path, base_per_sample, finetuned_field=None)
-        _save_base_metrics(output_dir, base_per_sample, base_test_loss, base_test_ppl, base_runtime)
+        # Final BASE save
+        _save_state(pred_path, state)
+        base_complete = len(base_per_sample) == len(test_records)
 
         # Release base
         del base_model, base_tokenizer
@@ -698,6 +836,8 @@ def _run(args: argparse.Namespace, log: Any) -> int:
     # ------------------------------------------------------------------
     ft_test_loss = float("nan")
     ft_test_ppl = float("nan")
+    ft_runtime = 0.0
+    ft_complete = bool(args.base_only)
     ft_per_sample: List[Dict[str, Any]] = []
     if not args.base_only:
         log.info("[finetuned] loading BASE + best_adapter...")
@@ -731,45 +871,58 @@ def _run(args: argparse.Namespace, log: Any) -> int:
             )
             return 40
 
-        # Loss
+        # Loss — 必须 79/79 全部 finite；不允许静默 skip。
         log.info("[finetuned] computing teacher-forced assistant-only loss on %d samples...", len(test_records))
         t0 = time.time()
         total_loss = 0.0
         total_sup = 0
+        bad_loss: List[str] = []
         for r in test_records:
             loss, sup = _assistant_only_loss(peft_model, ft_tokenizer, r, peft_model.device, torch)
-            if math.isfinite(loss) and sup > 0:
-                total_loss += loss * sup
-                total_sup += sup
+            if not (math.isfinite(loss) and sup > 0):
+                bad_loss.append(
+                    f"{r.get('sample_id', '?')}: loss={loss} sup={sup}"
+                )
+                continue
+            total_loss += loss * sup
+            total_sup += sup
         ft_runtime = time.time() - t0
         if total_sup > 0:
             ft_test_loss = total_loss / total_sup
             ft_test_ppl = float(math.exp(ft_test_loss)) if math.isfinite(ft_test_loss) else float("nan")
         log.info(
-            "[finetuned] loss PASS  loss=%.6f ppl=%.6f sup_tokens=%d runtime=%.1fs",
+            "[finetuned] loss  loss=%.6f ppl=%.6f sup_tokens=%d runtime=%.1fs",
             ft_test_loss, ft_test_ppl, total_sup, ft_runtime,
         )
+        if bad_loss:
+            log.error("[finetuned] TEST_LOSS_INCOMPLETE: %s", bad_loss[:5])
+            atomic_write_json(output_dir / "phase5d_report.json", {
+                "status": "BLOCKED",
+                "code": "TEST_LOSS_INCOMPLETE",
+                "stage": "finetuned",
+                "bad_samples": bad_loss,
+            })
+            return 40
         if not math.isfinite(ft_test_loss):
             log.error("[finetuned] FINETUNED_TEST_LOSS_NON_FINITE")
             return 40
 
         # Generation
-        log.info("[finetuned] generating 79/79...")
+        log.info("[finetuned] generating %d/%d...", len(test_records), len(test_records))
         for idx, r in enumerate(test_records):
             sid = r["sample_id"]
-            prompt_msgs = _prompt_messages(r["messages"])
-            ref = _reference_assistant(r["messages"])
-            # If base result already in existing_preds but finetuned missing, fill only finetuned
-            entry = None
-            for existing in base_per_sample:
-                if existing.get("sample_id") == sid:
-                    entry = dict(existing)
-                    break
-            if entry is None:
-                entry = {"sample_id": sid, "prompt_messages": prompt_msgs, "reference": ref}
-            if entry.get("finetuned_generation") is not None:
-                ft_per_sample.append(entry)
+            existing = state.get(sid, {})
+            if existing.get("finetuned_generation") is not None:
+                ft_per_sample.append({k: v for k, v in existing.items()
+                                      if k.startswith("finetuned_") or k in {"sample_id", "prompt_messages", "reference"}})
                 continue
+            prompt_msgs = _phase5d_prompt_messages(r["messages"])
+            ref = _reference_assistant(r["messages"])
+            entry = {
+                "sample_id": sid,
+                "prompt_messages": prompt_msgs,
+                "reference": ref,
+            }
             text, n_new, hit_cap = _greedy_generate(
                 peft_model, ft_tokenizer, prompt_msgs,
                 max_new_tokens=generation_max_new_tokens, torch=torch,
@@ -782,11 +935,16 @@ def _run(args: argparse.Namespace, log: Any) -> int:
             entry["finetuned_char_f1"] = round(char_f1(text, ref)["f1"], 6)
             entry["finetuned_rouge_l_f1"] = round(rouge_l_f1(text, ref)["f1"], 6)
             ft_per_sample.append(entry)
+            # merge into state, atomic save every RESUME_SAVE_EVERY samples
+            _merge_side_state(state, [entry], side="finetuned")
+            if (idx + 1) % RESUME_SAVE_EVERY == 0 or (idx + 1) == len(test_records):
+                _save_state(pred_path, state)
+                log.info("[finetuned] saved %d/%d to predictions", idx + 1, len(test_records))
             if (idx + 1) % 10 == 0 or idx == 0 or (idx + 1) == len(test_records):
                 log.info("[finetuned] generation %d/%d", idx + 1, len(test_records))
 
-        _dump_predictions(pred_path, ft_per_sample, finetuned_field="finetuned_generation")
-        _save_finetuned_metrics(output_dir, ft_per_sample, ft_test_loss, ft_test_ppl, ft_runtime)
+        _save_state(pred_path, state)
+        ft_complete = len(ft_per_sample) == len(test_records)
 
         del peft_model, ft_model, ft_tokenizer
         gc.collect()
@@ -802,6 +960,9 @@ def _run(args: argparse.Namespace, log: Any) -> int:
         base_per_sample, base_test_loss, base_test_ppl,
         ft_per_sample, ft_test_loss, ft_test_ppl,
         leak, log,
+        base_complete=base_complete,
+        ft_complete=ft_complete,
+        state=state,
     )
 
 
@@ -811,6 +972,93 @@ def _dump_predictions(path: Path, entries: List[Dict[str, Any]], finetuned_field
     for e in entries:
         by_id[e["sample_id"]] = e
     lines = [json.dumps(by_id[k], ensure_ascii=False) for k in sorted(by_id.keys())]
+    atomic_write_jsonl(path, lines)
+
+
+def _load_prediction_state(
+    path: Path,
+    test_sample_ids: set,
+    test_records_by_id: Dict[str, Dict[str, Any]],
+    *,
+    side: str,
+) -> Dict[str, Dict[str, Any]]:
+    """读取 ``test_predictions.jsonl``，构造 sample_id → record 状态。
+
+    校验：
+
+    - 每个 sample_id 必须属于当前 79 test 集合（否则 ``RESUME_PREDICTION_MISMATCH``）；
+    - reference 与 prompt_messages 必须与当前 test 一致。
+    """
+    state: Dict[str, Dict[str, Any]] = {}
+    if not path.exists():
+        return state
+    side_prefix = f"{side}_"
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue
+        sid = str(rec.get("sample_id", ""))
+        if not sid:
+            continue
+        if sid not in test_sample_ids:
+            raise RuntimeError(
+                f"RESUME_PREDICTION_MISMATCH: existing prediction sample_id={sid!r} "
+                f"not in current test set"
+            )
+        # Verify reference / prompt_messages match current test record
+        cur = test_records_by_id[sid]
+        cur_ref = _reference_assistant(cur["messages"])
+        cur_prompt = _phase5d_prompt_messages(cur["messages"])
+        if rec.get("reference") != cur_ref:
+            raise RuntimeError(
+                f"RESUME_PREDICTION_MISMATCH: sample_id={sid} reference drift"
+            )
+        if rec.get("prompt_messages") != cur_prompt:
+            raise RuntimeError(
+                f"RESUME_PREDICTION_MISMATCH: sample_id={sid} prompt_messages drift"
+            )
+        # Only keep the records relevant to the requested side
+        if side == "base":
+            pruned = {k: v for k, v in rec.items()
+                      if k.startswith("base_") or k in {"sample_id", "prompt_messages", "reference"}}
+        else:
+            pruned = {k: v for k, v in rec.items()
+                      if k.startswith("finetuned_") or k in {"sample_id", "prompt_messages", "reference"}}
+        state[sid] = pruned
+    return state
+
+
+def _merge_side_state(
+    target: Dict[str, Dict[str, Any]],
+    new_entries: List[Dict[str, Any]],
+    side: str,
+) -> None:
+    """merge ``new_entries``（``base_*`` / ``finetuned_*``）into ``target``。
+
+    只覆盖 ``{side}_*`` 字段；``target[sid]`` 中**非当前 side** 的字段
+    保持不变。这保证 BASE 与 FINETUNED resume 不会互相覆盖。
+    """
+    side_prefix = f"{side}_"
+    for e in new_entries:
+        sid = str(e.get("sample_id", ""))
+        if not sid:
+            continue
+        if sid not in target:
+            target[sid] = {"sample_id": sid}
+        for k, v in e.items():
+            if k.startswith(side_prefix) or k in {"prompt_messages", "reference"}:
+                target[sid][k] = v
+
+
+def _save_state(path: Path, state: Dict[str, Dict[str, Any]]) -> None:
+    """原子写 jsonl：sample_id 升序。"""
+    lines = [
+        json.dumps(state[k], ensure_ascii=False)
+        for k in sorted(state.keys())
+    ]
     atomic_write_jsonl(path, lines)
 
 
@@ -883,23 +1131,63 @@ def _finalize(
     ft_ppl: float,
     leak: Any,
     log: Any,
+    *,
+    base_complete: bool = False,
+    ft_complete: bool = False,
+    state: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> int:
-    # Build full per-sample list by sample_id
+    # Build authoritative per-sample state by sample_id.
+    # 来源优先级：state（resume 期间原子保存的真实状态） > base_per_sample / ft_per_sample。
     by_id: Dict[str, Dict[str, Any]] = {}
+    if state:
+        by_id.update({k: dict(v) for k, v in state.items()})
     for e in base_per_sample:
-        by_id[e["sample_id"]] = dict(e)
+        sid = str(e["sample_id"])
+        by_id.setdefault(sid, {"sample_id": sid})
+        for k, v in e.items():
+            if k.startswith("base_") or k in {"prompt_messages", "reference"}:
+                by_id[sid][k] = v
     for e in ft_per_sample:
-        sid = e["sample_id"]
-        if sid not in by_id:
-            by_id[sid] = dict(e)
-        else:
-            for k, v in e.items():
-                if k not in by_id[sid] or by_id[sid].get(k) is None:
-                    by_id[sid][k] = v
+        sid = str(e["sample_id"])
+        by_id.setdefault(sid, {"sample_id": sid})
+        for k, v in e.items():
+            if k.startswith("finetuned_") or k in {"prompt_messages", "reference"}:
+                by_id[sid][k] = v
+
+    # 必须恰好 79 行；否则 BLOCK
+    if len(by_id) != EXPECTED_TEST_COUNT:
+        log.error(
+            "[finalize] TEST_PREDICTION_ROW_COUNT_MISMATCH: %d != %d",
+            len(by_id), EXPECTED_TEST_COUNT,
+        )
+        atomic_write_json(output_dir / "phase5d_report.json", {
+            "status": "BLOCKED",
+            "code": "TEST_PREDICTION_ROW_COUNT_MISMATCH",
+            "expected": EXPECTED_TEST_COUNT,
+            "actual": len(by_id),
+        })
+        return 50
 
     pred_path = output_dir / "test_predictions.jsonl"
-    lines = [json.dumps(by_id[k], ensure_ascii=False) for k in sorted(by_id.keys())]
-    atomic_write_jsonl(pred_path, lines)
+    _save_state(pred_path, by_id)
+
+    # 验证每个 row 都具备必需字段
+    required_per_row = {
+        "sample_id", "prompt_messages", "reference",
+        "base_generation", "base_generated_tokens",
+        "base_char_f1", "base_rouge_l_f1",
+        "finetuned_generation", "finetuned_generated_tokens",
+        "finetuned_char_f1", "finetuned_rouge_l_f1",
+    }
+    bad_rows = [sid for sid, rec in by_id.items() if not required_per_row.issubset(set(rec.keys()))]
+    if bad_rows:
+        log.error("[finalize] TEST_PREDICTION_ROW_INCOMPLETE: %s", bad_rows[:5])
+        atomic_write_json(output_dir / "phase5d_report.json", {
+            "status": "BLOCKED",
+            "code": "TEST_PREDICTION_ROW_INCOMPLETE",
+            "bad_samples": bad_rows,
+        })
+        return 50
 
     # Base aggregate
     base_metrics_for_agg = [
@@ -940,22 +1228,22 @@ def _finalize(
         "cap_hit_count": sum(1 for m in ft_metrics_for_agg if m["hit_generation_cap"]),
     })
 
-    # Paired metrics
+    # Paired metrics (real tolerance)
     base_cf1_scores = [m["char_f1"] for m in base_metrics_for_agg]
     ft_cf1_scores = [m["char_f1"] for m in ft_metrics_for_agg]
     base_rl_scores = [m["rouge_l_f1"] for m in base_metrics_for_agg]
     ft_rl_scores = [m["rouge_l_f1"] for m in ft_metrics_for_agg]
-    paired_cf1 = paired_metrics(ft_cf1_scores, base_cf1_scores)
-    paired_rl = paired_metrics(ft_rl_scores, base_rl_scores)
+    paired_cf1 = paired_metrics(ft_cf1_scores, base_cf1_scores, tolerance=PAIRED_TOLERANCE)
+    paired_rl = paired_metrics(ft_rl_scores, base_rl_scores, tolerance=PAIRED_TOLERANCE)
 
     atomic_write_json(output_dir / "paired_metrics.json", {
         "char_f1": paired_cf1,
         "rouge_l_f1": paired_rl,
-        "tolerance": 1e-12,
+        "tolerance": PAIRED_TOLERANCE,
         "n": len(by_id),
     })
 
-    # Qualitative review
+    # Qualitative review (5+5+5)
     _write_qualitative_review(output_dir / "qualitative_review.md", by_id, paired_cf1)
 
     # Eval gate
@@ -969,8 +1257,8 @@ def _finalize(
         finetuned_empty_count=sum(1 for m in ft_metrics_for_agg if m["generated_tokens"] == 0),
         leakage_audit_result=leak,
         n_test=len(by_id),
-        base_eval_completed=len(base_per_sample) == 79,
-        finetuned_eval_completed=len(ft_per_sample) == 79,
+        base_eval_completed=base_complete,
+        finetuned_eval_completed=ft_complete,
     )
 
     test_loss_improvement = (base_loss - ft_loss) if (math.isfinite(base_loss) and math.isfinite(ft_loss)) else 0.0
@@ -985,6 +1273,8 @@ def _finalize(
         "code": gate.code,
         "ready_for_phase5e": bool(gate.ready_for_phase5e),
         "git": {"branch": "main", "commit": git_commit, "dirty": git_dirty},
+        "runtime_code_head": git_commit,
+        "runtime_code_dirty": git_dirty,
         "test_count": int(len(by_id)),
         "best_adapter_signature": best_sig.to_dict(),
         "tokenizer_signature": EXPECTED_TOKENIZER_SIGNATURE,
@@ -999,6 +1289,7 @@ def _finalize(
         "finetuned_aggregate": ft_agg,
         "paired_char_f1": paired_cf1,
         "paired_rouge_l_f1": paired_rl,
+        "paired_metrics_tolerance": PAIRED_TOLERANCE,
         "gate": gate.to_dict(),
         "reasons": list(gate.reasons),
         "generation_max_new_tokens": int(json.loads((output_dir / "eval_manifest.json").read_text(encoding="utf-8"))["generation_max_new_tokens"]),
@@ -1012,28 +1303,47 @@ def _finalize(
              base_loss, ft_loss, test_loss_improvement, test_loss_improvement_pct)
     log.info("[result] base char_f1=%.4f ft char_f1=%.4f", base_agg["mean_char_f1"], ft_agg["mean_char_f1"])
     log.info("[result] base rouge_l=%.4f ft rouge_l=%.4f", base_agg["mean_rouge_l_f1"], ft_agg["mean_rouge_l_f1"])
-    log.info("[result] paired cf1: ft_wins=%d base_wins=%d ties=%d",
-             paired_cf1["finetuned_wins"], paired_cf1["base_wins"], paired_cf1["ties"])
-    log.info("[result] paired rl: ft_wins=%d base_wins=%d ties=%d",
-             paired_rl["finetuned_wins"], paired_rl["base_wins"], paired_rl["ties"])
+    log.info("[result] paired cf1: ft_wins=%d base_wins=%d ties=%d tolerance=%.0e",
+             paired_cf1["finetuned_wins"], paired_cf1["base_wins"], paired_cf1["ties"], PAIRED_TOLERANCE)
+    log.info("[result] paired rl: ft_wins=%d base_wins=%d ties=%d tolerance=%.0e",
+             paired_rl["finetuned_wins"], paired_rl["base_wins"], paired_rl["ties"], PAIRED_TOLERANCE)
     log.info("=" * 60)
 
     return 0 if gate.code == "PASS" else 50
 
 
 def _write_qualitative_review(path: Path, by_id: Dict[str, Dict[str, Any]], paired_cf1: Dict[str, Any]) -> None:
+    """Phase 5D — Qualitative Review (deterministic 5 + 5 + 5)。
+
+    选择规则：
+
+    - 全部 sample 按 ``delta_char_f1 DESC, sample_id ASC`` 排序；
+    - top5：前 5 条 ⇒ largest improvements；
+    - bottom5：后 5 条 reverse ⇒ largest regressions；
+    - median5：从排序后中位数附近确定性取连续 5 条（中位数附近 5 条 ⇒ median-ish）。
+
+    仅供人工 inspection；**不参与 PASS Gate**。
+    """
     items = []
     for sid, e in by_id.items():
         delta = (e.get("finetuned_char_f1", 0.0) or 0.0) - (e.get("base_char_f1", 0.0) or 0.0)
         items.append({
             "sample_id": sid,
-            "delta": delta,
+            "delta": float(delta),
             "data": e,
         })
-    items.sort(key=lambda x: x["delta"], reverse=True)
+    # 严格 deterministic：delta DESC + sample_id ASC tie-break
+    items.sort(key=lambda x: (-x["delta"], x["sample_id"]))
+
     top5 = items[:5]
-    bottom5 = items[-5:][::-1]
-    median = items[len(items) // 2]
+    bottom5 = list(reversed(items[-5:]))
+    n = len(items)
+    mid = n // 2
+    # median5：取中位数附近 5 条连续区间，deterministic
+    start = max(0, mid - 2)
+    median5 = items[start:start + 5]
+    if len(median5) < 5 and n >= 5:
+        median5 = items[-5:]
 
     def _fmt_entry(label: str, entry: Dict[str, Any]) -> str:
         d = entry["data"]
@@ -1071,23 +1381,26 @@ def _write_qualitative_review(path: Path, by_id: Dict[str, Dict[str, Any]], pair
     md.append("# Phase 5D — Qualitative Review (frozen)")
     md.append("")
     md.append(
-        "Deterministic selection by ``finetuned_char_f1 - base_char_f1``."
-        "Not used for any parameter tuning — human inspection only."
+        "Deterministic selection by ``finetuned_char_f1 - base_char_f1`` DESC, "
+        "tie-break ``sample_id ASC``. 5 + 5 + 5 layout. Not used for any "
+        "parameter tuning — human inspection only."
     )
     md.append("")
-    md.append("## Top 5 Improvements (finetuned > base)")
+    md.append("## Top 5 Improvements (largest positive delta)")
     md.append("")
     for i, e in enumerate(top5, 1):
         md.append(_fmt_entry(f"#{i} improvement", e))
         md.append("")
-    md.append("## Top 5 Regressions (base > finetuned)")
+    md.append("## Top 5 Regressions (largest negative delta)")
     md.append("")
     for i, e in enumerate(bottom5, 1):
         md.append(_fmt_entry(f"#{i} regression", e))
         md.append("")
-    md.append("## Median sample (mid)")
+    md.append("## Median-ish 5 (5 samples around median)")
     md.append("")
-    md.append(_fmt_entry("median", median))
+    for i, e in enumerate(median5, 1):
+        md.append(_fmt_entry(f"#{i} median-ish", e))
+        md.append("")
 
     path.write_text("\n".join(md), encoding="utf-8")
 

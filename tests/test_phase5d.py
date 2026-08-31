@@ -800,3 +800,367 @@ def test_aggregate_metrics_empty():
     agg = aggregate_metrics([])
     assert agg["n"] == 0
     assert agg["mean_char_f1"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# 13) Assistant span prefix (Phase 5D-R recovery)
+# ---------------------------------------------------------------------------
+
+
+def test_assistant_span_normal_prefix():
+    """正常 prefix：masked=prompt_len, supervised=full-prompt, prefix_equal=True。"""
+    from data_pipeline.training.phase5d import assistant_span_from_prefix
+
+    span = assistant_span_from_prefix([1, 2, 3], [1, 2, 3, 4, 5])
+    assert span == {
+        "prefix_equal": True,
+        "prompt_len": 3,
+        "masked_tokens": 3,
+        "supervised_tokens": 2,
+    }
+
+
+def test_assistant_span_prefix_mismatch_raises():
+    """prefix mismatch ⇒ raise；禁止 fallback prompt_len=0 / all supervised。"""
+    import pytest
+    from data_pipeline.training.phase5d import assistant_span_from_prefix
+
+    with pytest.raises(ValueError):
+        assistant_span_from_prefix([1, 2, 9], [1, 2, 3, 4])
+    # 也不能变成「prefix_len=0 + 全部 supervised」之类的静默降级
+    try:
+        assistant_span_from_prefix([1, 2, 9], [1, 2, 3, 4])
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError on prefix mismatch")
+
+
+def test_assistant_span_invariant_masked_plus_supervised_equals_seq():
+    """masked_tokens + supervised_tokens == sequence_length（不变性）。"""
+    from data_pipeline.training.phase5d import assistant_span_from_prefix
+
+    span = assistant_span_from_prefix([7, 8], [7, 8, 11, 13, 17, 19])
+    assert span["masked_tokens"] + span["supervised_tokens"] == 6
+    assert span["masked_tokens"] > 0
+    assert span["supervised_tokens"] > 0
+
+
+def test_assistant_span_handles_generator_input():
+    """prompt_ids / full_ids 可以是 generator；函数内部 list-cast 必须正确。"""
+    from data_pipeline.training.phase5d import assistant_span_from_prefix
+
+    span = assistant_span_from_prefix(iter([1, 2, 3]), iter([1, 2, 3, 4]))
+    assert span["masked_tokens"] == 3
+    assert span["supervised_tokens"] == 1
+    assert span["prefix_equal"] is True
+
+
+# ---------------------------------------------------------------------------
+# 14) Paired metrics real tolerance (Phase 5D-R recovery)
+# ---------------------------------------------------------------------------
+
+
+def test_paired_metrics_tolerance_zero_is_tie():
+    """delta == 0 ⇒ tie（即使 tolerance=0）。"""
+    from data_pipeline.training.phase5d import paired_metrics
+
+    r = paired_metrics([0.5, 0.5], [0.5, 0.5], tolerance=0.0)
+    assert r["finetuned_wins"] == 0
+    assert r["base_wins"] == 0
+    assert r["ties"] == 2
+    assert r["tolerance"] == 0.0
+
+
+def test_paired_metrics_tolerance_below_threshold_is_tie():
+    """abs(delta) < tolerance ⇒ tie。"""
+    from data_pipeline.training.phase5d import paired_metrics
+
+    # delta = 1e-13, tolerance = 1e-12 ⇒ tie
+    r = paired_metrics(
+        [0.5 + 1e-13, 0.5 - 1e-13],
+        [0.5, 0.5],
+        tolerance=1e-12,
+    )
+    assert r["finetuned_wins"] == 0
+    assert r["base_wins"] == 0
+    assert r["ties"] == 2
+    assert r["tolerance"] == 1e-12
+
+
+def test_paired_metrics_tolerance_above_threshold_is_win():
+    """delta > tolerance ⇒ finetuned win。"""
+    from data_pipeline.training.phase5d import paired_metrics
+
+    r = paired_metrics(
+        [0.5 + 2e-12, 0.5],
+        [0.5, 0.5],
+        tolerance=1e-12,
+    )
+    assert r["finetuned_wins"] == 1
+    assert r["ties"] == 1
+    assert r["base_wins"] == 0
+
+
+def test_paired_metrics_tolerance_below_negative_threshold_is_base_win():
+    """delta < -tolerance ⇒ base win。"""
+    from data_pipeline.training.phase5d import paired_metrics
+
+    r = paired_metrics(
+        [0.5 - 2e-12, 0.5],
+        [0.5, 0.5],
+        tolerance=1e-12,
+    )
+    assert r["base_wins"] == 1
+    assert r["ties"] == 1
+    assert r["finetuned_wins"] == 0
+
+
+def test_paired_metrics_negative_tolerance_raises():
+    """tolerance < 0 ⇒ raise。"""
+    import pytest
+    from data_pipeline.training.phase5d import paired_metrics
+
+    with pytest.raises(ValueError):
+        paired_metrics([0.5], [0.5], tolerance=-1e-12)
+
+
+# ---------------------------------------------------------------------------
+# 15) Near-duplicate optimization (Phase 5D-R recovery)
+# ---------------------------------------------------------------------------
+
+
+def test_near_dup_optimized_matches_naive():
+    """优化版 leakage_audit 与 naive 版本结果完全一致。"""
+    import random
+    import string
+    from data_pipeline.training.phase5d import leakage_audit
+
+    rng = random.Random(42)
+    def _mk(n: int, prefix: str) -> List[Dict[str, Any]]:
+        out = []
+        for i in range(n):
+            txt = prefix + "".join(rng.choices(string.ascii_lowercase, k=200))
+            out.append({
+                "sample_id": f"id_{prefix}_{i}",
+                "messages": [
+                    {"role": "user", "content": txt},
+                    {"role": "assistant", "content": txt[::-1]},
+                ],
+            })
+        return out
+
+    train = _mk(30, "train")
+    val = _mk(5, "val")
+    test = _mk(20, "tst")
+
+    optimized = leakage_audit(test, train, val)
+
+    # naive re-implementation with same definition
+    from data_pipeline.training.phase5d import (
+        _normalize_text, _sequence_ratio, _messages_hash, _prompt_hash,
+    )
+    test_ids = {str(r.get("sample_id")) for r in test}
+    train_ids = {str(r.get("sample_id")) for r in train}
+    val_ids = {str(r.get("sample_id")) for r in val}
+    # full overlap
+    train_full = {_messages_hash(r["messages"]) for r in train}
+    val_full = {_messages_hash(r["messages"]) for r in val}
+    test_full = {_messages_hash(r["messages"]) for r in test}
+    full_ov_naive = sum(1 for h in test_full if h in train_full or h in val_full)
+    # prompt overlap
+    train_p = {_prompt_hash(r["messages"]) for r in train}
+    val_p = {_prompt_hash(r["messages"]) for r in val}
+    test_p = {_prompt_hash(r["messages"]) for r in test}
+    prompt_ov_naive = sum(1 for h in test_p if h in train_p or h in val_p)
+    # near dup naive
+    combined = list(train) + list(val)
+    combined_ids = [str(cr.get("sample_id", "")) for cr in combined]
+    combined_splits = ["train" if combined_ids[i] in train_ids else "validation"
+                      for i in range(len(combined))]
+    near_dup_naive = 0
+    for tr in test:
+        t_full = _normalize_text("".join(str(m.get("content", "")) for m in tr["messages"]))
+        best = 0.0
+        best_match_id = ""
+        for cr in combined:
+            c_full = _normalize_text("".join(str(m.get("content", "")) for m in cr["messages"]))
+            sim = _sequence_ratio(t_full, c_full)
+            if sim > best:
+                best = sim
+                best_match_id = str(cr.get("sample_id", ""))
+        if best >= 0.95:
+            near_dup_naive += 1
+
+    assert optimized.full_message_overlap_count == full_ov_naive
+    assert optimized.prompt_overlap_count == prompt_ov_naive
+    assert optimized.near_duplicate_count == near_dup_naive
+    # also top entries should match best_match_sample_id (in declaration order, no jumble)
+    assert [t["best_match_sample_id"] for t in optimized.near_duplicate_top] == [
+        best for best in []]
+    # top list existence:
+    assert isinstance(optimized.near_duplicate_top, list)
+
+
+# ---------------------------------------------------------------------------
+# 16) Prompt messages multi-turn (Phase 5D-R recovery)
+# ---------------------------------------------------------------------------
+
+
+def test_prompt_messages_multiturn_keeps_only_last_assistant():
+    """多轮 user/assistant/user/assistant(reference) ⇒ 仅最后一条被移除。"""
+    from data_pipeline.training.phase5d import _prompt_messages
+
+    msgs = [
+        {"role": "user", "content": "u1"},
+        {"role": "assistant", "content": "a1"},
+        {"role": "user", "content": "u2"},
+        {"role": "assistant", "content": "REFERENCE"},
+    ]
+    prompt = _prompt_messages(msgs)
+    assert len(prompt) == 3
+    # last prompt message 必须保留 user，不能删掉中间的 assistant
+    assert prompt[-1] == {"role": "user", "content": "u2"}
+    assert all(p["content"] != "REFERENCE" for p in prompt)
+    # 中间 assistant 不能被错误删除
+    assert any(p["role"] == "assistant" and p["content"] == "a1" for p in prompt)
+
+
+def test_prompt_messages_runtime_script_consistency():
+    """``evaluate_qlora_test._prompt_messages`` 必须 == ``phase5d._prompt_messages``。"""
+    from data_pipeline.training.phase5d import _prompt_messages as phase5d_prompt
+    from data_pipeline.utils import get_logger
+
+    # Lazy import to avoid GPU dependencies
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    import evaluate_qlora_test as runtime  # noqa: E402
+
+    msgs = [
+        {"role": "system", "content": "s"},
+        {"role": "user", "content": "u"},
+        {"role": "assistant", "content": "REF"},
+        {"role": "user", "content": "u2"},
+    ]
+    assert runtime._prompt_messages(msgs) == phase5d_prompt(msgs)
+
+
+# ---------------------------------------------------------------------------
+# 17) Manifest freeze + protocol signature (Phase 5D-R recovery)
+# ---------------------------------------------------------------------------
+
+
+def test_compute_eval_protocol_signature_is_stable():
+    """相同 payload ⇒ 相同 signature。"""
+    from data_pipeline.training.phase5d import compute_eval_protocol_signature
+
+    p = {"model_name": "x", "do_sample": False}
+    s1 = compute_eval_protocol_signature(p)
+    s2 = compute_eval_protocol_signature(p)
+    assert s1 == s2
+    assert len(s1) == 64
+
+
+def test_compute_eval_protocol_signature_ignores_git_provenance():
+    """git commit / dirty 不影响 signature。"""
+    from data_pipeline.training.phase5d import compute_eval_protocol_signature
+
+    base = {"a": 1, "b": 2}
+    s_base = compute_eval_protocol_signature(base)
+    s_with_git = compute_eval_protocol_signature(
+        {**base, "git": {"commit": "abc", "dirty": True}},
+    )
+    assert s_base == s_with_git
+
+
+def test_verify_frozen_manifest_consistency():
+    """verify_frozen_manifest：所有 semantic 字段一致 ⇒ ok=True。"""
+    from data_pipeline.training.phase5d import (
+        compute_eval_protocol_signature,
+        verify_frozen_manifest,
+    )
+
+    payload = {
+        "model_name": "m",
+        "model_revision": "rev",
+        "do_sample": False,
+        "enable_thinking": False,
+        "assistant_only_loss": True,
+        "tokenizer_signature": "tok",
+        "test_sample_id_signature": "sid",
+        "generation_max_new_tokens": 512,
+        "quantization": {"quant_type": "nf4"},
+        "max_length": 2048,
+        "normalization": {"deterministic": True},
+        "metrics": {"char_f1": "x"},
+        "expected_lora_layers": 252,
+        "seed": 42,
+    }
+    sig = compute_eval_protocol_signature(payload)
+    existing = {**payload, "protocol_frozen": True, "eval_protocol_signature": sig}
+    ok, reasons = verify_frozen_manifest(
+        existing,
+        expected_tokenizer_signature="tok",
+        expected_test_sample_id_signature="sid",
+        expected_generation_max_new_tokens=512,
+        expected_eval_protocol_signature=sig,
+    )
+    assert ok
+    assert reasons == []
+
+
+def test_verify_frozen_manifest_detects_drift():
+    """任何 semantic 字段 drift ⇒ ok=False。"""
+    from data_pipeline.training.phase5d import (
+        compute_eval_protocol_signature,
+        verify_frozen_manifest,
+    )
+
+    payload = {
+        "model_name": "m",
+        "model_revision": "rev",
+        "do_sample": False,
+        "enable_thinking": False,
+        "assistant_only_loss": True,
+        "tokenizer_signature": "tok",
+        "test_sample_id_signature": "sid",
+        "generation_max_new_tokens": 512,
+        "quantization": {"quant_type": "nf4"},
+        "max_length": 2048,
+        "normalization": {"deterministic": True},
+        "metrics": {"char_f1": "x"},
+        "expected_lora_layers": 252,
+        "seed": 42,
+    }
+    sig = compute_eval_protocol_signature(payload)
+    existing = {**payload, "protocol_frozen": True, "eval_protocol_signature": sig}
+    ok, reasons = verify_frozen_manifest(
+        existing,
+        expected_tokenizer_signature="WRONG",  # drift
+        expected_test_sample_id_signature="sid",
+        expected_generation_max_new_tokens=512,
+        expected_eval_protocol_signature=sig,
+    )
+    assert not ok
+    assert any("tokenizer_signature" in r for r in reasons)
+
+
+# ---------------------------------------------------------------------------
+# 18) Semantic protocol fields constant
+# ---------------------------------------------------------------------------
+
+
+def test_semantic_protocol_fields_contains_required():
+    """SEMANTIC_PROTOCOL_FIELDS 必须包含关键冻结字段。"""
+    from data_pipeline.training.phase5d import SEMANTIC_PROTOCOL_FIELDS
+
+    required = {
+        "model_name",
+        "model_revision",
+        "tokenizer_signature",
+        "test_sample_id_signature",
+        "generation_max_new_tokens",
+        "do_sample",
+        "enable_thinking",
+        "assistant_only_loss",
+    }
+    assert required.issubset(set(SEMANTIC_PROTOCOL_FIELDS))

@@ -274,6 +274,53 @@ def _normalize_text(text: str) -> str:
     return s
 
 
+def assistant_span_from_prefix(
+    prompt_ids: Sequence[int],
+    full_ids: Sequence[int],
+) -> Dict[str, Any]:
+    """纯函数：从 ``prompt_ids`` / ``full_ids`` 推断 assistant 监督段。
+
+    语义（与 Phase 5C-B teacher-forced loss 完全一致）：
+
+    - ``prompt_ids`` = ``apply_chat_template(msgs[:-1], add_generation_prompt=True)``
+      对应的 token 序列；
+    - ``full_ids`` = ``apply_chat_template(msgs, add_generation_prompt=False)``
+      对应的 token 序列；
+    - 训练时 ``labels[i] = -100`` 当 ``i < len(prompt_ids)``，否则 ``= full_ids[i]``；
+    - 因此：
+
+      - ``masked_tokens = len(prompt_ids)``（prompt 部分 ⇒ ``-100``）
+      - ``supervised_tokens = len(full_ids) - len(prompt_ids)``（assistant 部分）
+
+    必须验证 ``full_ids[:len(prompt_ids)] == prompt_ids``。
+    prefix mismatch ⇒ ``prefix_equal=False``，并 **raise** ``ValueError``；
+    不允许静默降级为 ``prompt_len = 0`` / ``all supervised``。
+
+    Returns
+    -------
+    dict
+        - ``prefix_equal``: ``bool``（仅在正常路径为 True）
+        - ``prompt_len``: ``int``
+        - ``masked_tokens``: ``int``（= ``prompt_len``）
+        - ``supervised_tokens``: ``int``（= ``full_len - prompt_len``）
+    """
+    prompt_list = [int(x) for x in prompt_ids]
+    full_list = [int(x) for x in full_ids]
+    if not (len(prompt_list) <= len(full_list)
+            and full_list[: len(prompt_list)] == prompt_list):
+        raise ValueError(
+            "assistant_span_from_prefix: prefix mismatch: "
+            f"len(prompt)={len(prompt_list)} len(full)={len(full_list)} "
+            "且 full[:len(prompt)] != prompt"
+        )
+    return {
+        "prefix_equal": True,
+        "prompt_len": int(len(prompt_list)),
+        "masked_tokens": int(len(prompt_list)),
+        "supervised_tokens": int(len(full_list) - len(prompt_list)),
+    }
+
+
 def _messages_hash(messages: Sequence[Mapping[str, Any]]) -> str:
     """规范化后完整 messages 的 SHA256。"""
     norm = json.dumps(
@@ -380,6 +427,13 @@ def leakage_audit(
     3) prompt 规范化后完全重复检查（必须 = 0，否则 BLOCK）；
     4) 高相似度近似重复统计（>= near_dup_threshold，WARNING only）。
 
+    性能优化（保持语义不变）：
+
+    - 预计算 ``normalized_train_val`` / ``normalized_test``，不在 inner loop
+      重复 ``_normalize_text(...)``；
+    - 用 LCS-ratio 数学上界 ``2 * min(n, m) / (n + m) < threshold`` 做长度剪枝，
+      对不可能达到 ``near_dup_threshold`` 的 pair 直接跳过 LCS DP。
+
     Returns
     -------
     LeakageAuditResult
@@ -407,27 +461,47 @@ def leakage_audit(
         1 for h in test_prompt_hashes if h in train_prompt_hashes or h in val_prompt_hashes
     )
 
-    # near duplicate (against train ∪ val, normalized full messages)
+    # ------------------------------------------------------------------
+    # Near duplicate (against train ∪ val, normalized full messages).
+    # 预计算规范化字符串 + 长度上界剪枝。
+    # ------------------------------------------------------------------
     combined = list(train_records) + list(validation_records)
+    train_val_norm: List[str] = [
+        _normalize_text("".join(str(m.get("content", "")) for m in cr["messages"]))
+        for cr in combined
+    ]
+    combined_ids = [str(cr.get("sample_id", "")) for cr in combined]
+    combined_splits = [
+        "train" if combined_ids[i] in train_ids else "validation"
+        for i in range(len(combined))
+    ]
+
     near_dup_count = 0
     top: List[Dict[str, Any]] = []
     for tr in test_records:
         t_full = _normalize_text(
             "".join(str(m.get("content", "")) for m in tr["messages"])
         )
+        n = len(t_full)
+        if n == 0:
+            continue
         best = 0.0
         best_match_id = ""
         best_split = ""
-        for cr in combined:
-            c_full = _normalize_text(
-                "".join(str(m.get("content", "")) for m in cr["messages"])
-            )
+        for c_full, cid, csplit in zip(train_val_norm, combined_ids, combined_splits):
+            m = len(c_full)
+            if m == 0:
+                continue
+            # LCS ratio 上界 = 2 * min(n, m) / (n + m)；
+            # 若上界 < threshold ⇒ 数学上不可能达到阈值，直接跳过。
+            upper = 2.0 * min(n, m) / (n + m)
+            if upper < near_dup_threshold:
+                continue
             sim = _sequence_ratio(t_full, c_full)
             if sim > best:
                 best = sim
-                best_match_id = str(cr.get("sample_id", ""))
-                # split 推断：如果 best_match_id ∈ train_ids ⇒ "train"，否则 "validation"
-                best_split = "train" if best_match_id in train_ids else "validation"
+                best_match_id = cid
+                best_split = csplit
         if best >= near_dup_threshold:
             near_dup_count += 1
             if len(top) < near_dup_top_n:
@@ -631,22 +705,34 @@ def aggregate_metrics(per_sample: Sequence[Mapping[str, Any]]) -> Dict[str, floa
 def paired_metrics(
     finetuned_scores: Sequence[float],
     base_scores: Sequence[float],
+    *,
+    tolerance: float = 1e-12,
 ) -> Dict[str, Any]:
-    """paired wins / regressions / ties。
+    """paired wins / regressions / ties（带 ``tolerance``）。
 
-    对每个 sample，``finetuned > base`` ⇒ win；``finetuned < base`` ⇒ regression；
-    ``==`` ⇒ tie。
+    对每个 sample：
+
+    - ``delta = finetuned - base``；
+    - ``delta > tolerance`` ⇒ finetuned win；
+    - ``delta < -tolerance`` ⇒ base win（即 finetuned regression）；
+    - 否则 ⇒ tie。
+
+    默认 ``tolerance = 1e-12``，与 Phase 5D 既有 ``float`` 评分精度一致；
+    但 ``tolerance`` 也参与 manifest 的 semantic protocol 字段。
     """
     assert len(finetuned_scores) == len(base_scores), "finetuned / base 长度不一致"
+    if tolerance < 0:
+        raise ValueError(f"tolerance 必须 >= 0，得到 {tolerance}")
     wins = 0
     losses = 0
     ties = 0
     deltas: List[float] = []
     for f, b in zip(finetuned_scores, base_scores):
-        deltas.append(float(f) - float(b))
-        if float(f) > float(b):
+        delta = float(f) - float(b)
+        deltas.append(delta)
+        if delta > tolerance:
             wins += 1
-        elif float(f) < float(b):
+        elif delta < -tolerance:
             losses += 1
         else:
             ties += 1
@@ -660,6 +746,7 @@ def paired_metrics(
         "regression_rate": round(losses / n, 4) if n else 0.0,
         "tie_rate": round(ties / n, 4) if n else 0.0,
         "mean_delta": round(sum(deltas) / n, 4) if n else 0.0,
+        "tolerance": float(tolerance),
     }
 
 
@@ -789,12 +876,98 @@ def write_eval_manifest(
     payload: Mapping[str, Any],
     logger: Any = None,
 ) -> None:
-    """原子写入 ``eval_manifest.json``，并强制 ``protocol_frozen = True``。"""
+    """原子写入 ``eval_manifest.json``，并强制 ``protocol_frozen = True``。
+
+    同时计算并写入 ``eval_protocol_signature``：基于 semantic protocol 关键字段
+    （排除 git provenance 与 runtime 测试样本级字段）的 SHA256。
+    """
     log = logger or _LOG
     body = dict(payload)
     body["protocol_frozen"] = True
+    body["eval_protocol_signature"] = compute_eval_protocol_signature(body)
     atomic_write_json(Path(path), body)
-    log.info("Wrote eval_manifest.json to %s (protocol_frozen=True)", path)
+    log.info(
+        "Wrote eval_manifest.json to %s (protocol_frozen=True, signature=%s)",
+        path, body["eval_protocol_signature"][:16],
+    )
+
+
+# ---------------------------------------------------------------------------
+# 9) Semantic evaluation protocol signature
+# ---------------------------------------------------------------------------
+
+
+# Semantic evaluation protocol 关键字段集合；其他字段不参与 signature。
+SEMANTIC_PROTOCOL_FIELDS: Tuple[str, ...] = (
+    "backend",
+    "model_name",
+    "model_revision",
+    "best_adapter_path",
+    "best_adapter_signature_sha256",
+    "tokenizer_signature",
+    "test_jsonl_path",
+    "test_jsonl_sha256",
+    "test_count",
+    "test_sample_id_signature",
+    "quantization",
+    "max_length",
+    "assistant_only_loss",
+    "enable_thinking",
+    "do_sample",
+    "generation_max_new_tokens",
+    "normalization",
+    "metrics",
+    "seed",
+    "expected_lora_layers",
+    "paired_metrics_tolerance",
+    "resume_save_every",
+    "near_dup_threshold",
+)
+
+
+def compute_eval_protocol_signature(
+    manifest_body: Mapping[str, Any],
+) -> str:
+    """基于关键 semantic 字段计算 manifest 的稳定 signature。
+
+    git provenance / dirty flag / runtime 测试 sample-level 字段不参与。
+    """
+    canonical: Dict[str, Any] = {}
+    for k in SEMANTIC_PROTOCOL_FIELDS:
+        if k in manifest_body:
+            canonical[k] = manifest_body[k]
+    canonical_text = json.dumps(canonical, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(canonical_text.encode("utf-8")).hexdigest()
+
+
+def verify_frozen_manifest(
+    existing: Mapping[str, Any],
+    *,
+    expected_tokenizer_signature: str,
+    expected_test_sample_id_signature: str,
+    expected_generation_max_new_tokens: int,
+    expected_eval_protocol_signature: str,
+) -> Tuple[bool, List[str]]:
+    """校验已存在 frozen manifest 的语义是否一致。
+
+    Returns ``(ok, reasons)``；任一关键字段 drift ⇒ ``ok=False``。
+    """
+    reasons: List[str] = []
+    if not existing.get("protocol_frozen"):
+        reasons.append("existing manifest protocol_frozen != True")
+    if existing.get("tokenizer_signature") != expected_tokenizer_signature:
+        reasons.append("tokenizer_signature drift")
+    if existing.get("test_sample_id_signature") != expected_test_sample_id_signature:
+        reasons.append("test_sample_id_signature drift")
+    if existing.get("generation_max_new_tokens") != expected_generation_max_new_tokens:
+        reasons.append("generation_max_new_tokens drift")
+    sig = existing.get("eval_protocol_signature")
+    if sig != expected_eval_protocol_signature:
+        reasons.append(
+            f"eval_protocol_signature drift (got={sig[:16] if sig else None}, "
+            f"expected={expected_eval_protocol_signature[:16]})"
+        )
+    return (len(reasons) == 0, reasons)
 
 
 __all__ = [
@@ -810,6 +983,7 @@ __all__ = [
     "_messages_hash",
     "_prompt_hash",
     "_sequence_ratio",
+    "assistant_span_from_prefix",
     "normalize_for_eval",
     "normalize_for_lexical",
     "char_f1",
@@ -819,4 +993,7 @@ __all__ = [
     "paired_metrics",
     "eval_gate",
     "write_eval_manifest",
+    "compute_eval_protocol_signature",
+    "verify_frozen_manifest",
+    "SEMANTIC_PROTOCOL_FIELDS",
 ]
