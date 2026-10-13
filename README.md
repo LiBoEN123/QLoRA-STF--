@@ -1,700 +1,419 @@
-# QLoRA SFT 党建知识微调项目
+# 基于 Qwen3-8B 与 QLoRA 的党建知识微调项目
 
-> 7B/8B 量级（Qwen3-8B）+ QLoRA + SFT 领域大模型微调数据流水线。
-> 当前阶段：**Phase 5B — QLoRA Runtime Preflight + One-Step Smoke Training**。
+本项目面向基层党务知识问答，提供从原始文档处理、监督微调数据集构建，到 QLoRA 训练、独立测试集评估和 LoRA Adapter 打包的完整工程流程。项目以 `Qwen/Qwen3-8B` 为基础模型，采用 4-bit NF4 量化与 LoRA 参数高效微调，在保留来源追溯信息的基础上，将文档中已有的 FAQ 转换为对话式训练样本。
 
-本仓库按阶段实现：
+仓库已包含完整训练、评估和发布验收记录。已保存的实验结果显示：在 79 条保留测试样本上，微调模型的测试损失由 **1.9303** 降至 **1.2241**，下降约 **36.59%**；字符级 F1 和 ROUGE-L 均有提升。发布验收报告记录 `project_complete=true`。这些数据来自仓库内的历史运行产物，具体配置、评估口径和适用边界见下文。
 
-1. **Phase 1 — Extraction**：原始数据准备 + 文档抽取（统一 JSONL + manifest）。
-2. **Phase 2 — Cleaning**：文本清洗、结构恢复、质量过滤、SimHash 去重。
-3. **Phase 3 — Semantic Unit + FAQ + Chunking**：Semantic Unit 恢复 + FAQ 配对 + 结构感知 Chunking。
-4. **Phase 4 — SFT Dataset Construction**：把 FAQ SemanticUnit 转成标准 chat-style SFT messages，做数据质量审计与 Train/Val/Test 确定性划分。
-5. **Phase 5A — Qwen3 Tokenizer Validation**：通过 `AutoTokenizer.apply_chat_template` 对 SFT 数据做 token 长度、prompt prefix match、coverage、thinking marker 等审计，不加载模型权重、不初始化 GPU、不训练。
-6. **Phase 5B — QLoRA Runtime Preflight + One-Step Smoke Training**：在加载真实 8B 模型前复算 Phase 5A gate；在 GPU 上以 4-bit NF4 + LoRA r=16 + `assistant_only_loss=True` 跑 1 个 optimizer step，验证 forward / backward / save / reload / 推理最小链。
-7. **Phase 5C — Full QLoRA SFT Training**（后续）：真正的多 epoch / packing / checkpoint / evaluation。Phase 5B 不实现。
+## 1. 项目目标与范围
 
-> Phase 1 + Phase 2 + Phase 3 + Phase 4 + Phase 5A + Phase 5B 已实现。Phase 4 仍然**不会**调用任何 LLM、不会加载 tokenizer、不会训练模型——只把 Phase 3 已经确认的可靠 FAQ 稳定、无损、可追溯地转换成标准 Chat-style SFT 数据集。Phase 5A 仅加载 `AutoTokenizer`（CPU），不下载 8B 模型权重，不引入 QLoRA / Trainer / LoRAConfig。Phase 5B 在 GPU 上以 4-bit + LoRA 跑 1 个 optimizer step，**不**做完整 epoch 训练，不做超参搜索，不保存 merged 模型。
-> Phase 3 在历史迭代中曾为了恢复少量边界 FAQ 临时引入"Phase 3.5"的额外恢复流程，当前已合并回收——仅保留唯一的"一次检测 + 一次配对"主链。
+项目目标是建立可追溯、可审计的领域模型微调流程，用于基层党务 FAQ 的研究验证和辅助问答。主要交付内容包括：
 
----
+- 文档抽取、清洗、结构恢复和 FAQ 配对程序。
+- 具有稳定样本标识、来源信息和固定划分规则的 SFT 数据集。
+- Tokenizer 审计、训练环境预检、单步冒烟测试与完整训练脚本。
+- 基座模型与微调模型的测试集对照结果、逐条预测和质量审计记录。
+- LoRA Adapter 发布包、模型卡、训练摘要、评估摘要及文件校验和。
 
-## Phase 1 — Document Extraction
+当前工程以命令行脚本为使用入口，交付范围不包含 Web 界面、在线推理 API、RAG 检索服务或完整模型合并部署。数据处理阶段依据源文档恢复已有问答，不使用大模型合成新的问答内容。
 
-### 目录约定
+## 2. 技术方案
 
-把原始资料按需放入 `data/raw/` 下（不强求子目录，但建议按类型组织）：
+### 2.1 处理流程
 
-```text
-data/raw/
-├── pdf/
-├── word/
-├── markdown/
-├── text/
-├── html/
-├── excel/
-└── qa/
+```mermaid
+flowchart TD
+    A[原始文档 data/raw] --> B[文档抽取与来源登记]
+    B --> C[文本清洗、结构识别与去重]
+    C --> D[语义单元恢复与 FAQ 配对]
+    D --> E[结构化 chunks 与 FAQ 审计]
+    D --> F[FAQ 转换为 SFT messages]
+    F --> G[训练集、验证集、测试集]
+    G --> H[Tokenizer 长度与前缀对齐审计]
+    H --> I[环境预检与单步冒烟测试]
+    I --> J[QLoRA 训练与验证集选优]
+    J --> K[基座与最佳 Adapter 的测试集对照评估]
+    K --> L[Adapter 打包、校验与重载推理验收]
 ```
 
-程序会**递归**扫描 `data/raw/**` 下的所有支持文件，**不依赖父目录名**判断类型——只根据文件后缀。
+SFT 构建直接读取 `data/chunks/semantic_units.jsonl` 中的 FAQ 语义单元；`chunks.jsonl` 是同一阶段的结构化文本产物，不直接作为训练输入。训练使用 `train.jsonl` 更新参数，使用 `validation.jsonl` 选择最佳检查点，`test.jsonl` 保留用于最终对照评估。
 
-> `data/raw/` 是只读输入区，程序不会修改、删除、移动或重命名任何原始文件。
+### 2.2 模块与实现
 
-### 运行
+| 模块 | 主要职责 | 实现位置 |
+| --- | --- | --- |
+| 文档抽取 | 按文件后缀选择解析器，输出统一记录、文件哈希及抽取清单 | `src/data_pipeline/extractor.py`、`extractors/` |
+| 文本清洗 | Unicode 与空白规范化、结构识别、质量过滤、精确及 SimHash 去重 | `src/data_pipeline/cleaning/` |
+| 语义处理 | 恢复源记录顺序、识别问题、配对答案、保留标题结构并分块 | `src/data_pipeline/chunking/` |
+| 数据集构建 | FAQ 转换、样本校验、同问冲突剔除、确定性划分与泄漏检查 | `src/data_pipeline/sft/` |
+| Tokenizer 审计 | 使用模型聊天模板检查长度、覆盖率、提示词前缀及回答监督区间 | `src/data_pipeline/tokenization/` |
+| 模型训练 | 量化加载、LoRA 配置、训练检查、检查点选择及 Adapter 验证 | `src/data_pipeline/training/` |
+| 评估与发布 | 计算测试指标、记录逐条预测、验证权重来源并生成发布包 | `training/phase5d.py`、`training/phase5e.py` 及对应脚本 |
+
+训练后端包含 Hugging Face 和 Unsloth 两种实现，用于环境验证及后端对比；当前正式训练脚本采用 **Unsloth + TRL SFTTrainer**。训练目标为 `assistant_only_loss=True`，Unsloth 路径通过提示词与完整对话的 token 前缀对齐构造监督标签，并在运行中检查回答区域的 mask。
+
+## 3. 目录结构
+
+```text
+.
+├── README.md
+├── requirements.txt                 # 文档处理与 Tokenizer 依赖
+├── requirements-train.txt           # 训练通用依赖
+├── src/data_pipeline/
+│   ├── extractors/                  # 各格式解析器
+│   ├── cleaning/                    # 清洗、结构识别与去重
+│   ├── chunking/                    # 语义单元、FAQ 与分块
+│   ├── sft/                         # SFT 样本与数据划分
+│   ├── tokenization/                # Tokenizer 审计
+│   ├── training/                    # 训练后端、评估与发布逻辑
+│   └── utils.py                     # 公共读写与日志工具
+├── scripts/                         # 命令行入口
+├── tests/                           # 各阶段测试
+├── docs/MODEL_CARD.md                # 模型说明与加载示例
+├── data/
+│   ├── raw/                         # 原始文档输入
+│   ├── extracted/                   # 抽取记录与清单
+│   ├── processed/                   # 清洗结果、拒绝记录与重复记录
+│   ├── chunks/                      # 语义单元、分块与 FAQ 审计
+│   ├── sft/                         # 全量样本及 train/validation/test
+│   ├── tokenizer/                   # 逐样本 token 审计及汇总
+│   └── training/                    # 训练、评估和发布验收报告
+├── outputs/                         # 运行生成的检查点与 Adapter
+│   ├── phase5c-b/                   # 正式训练检查点及 best_adapter
+│   └── phase5e/release/              # 最终发布包
+└── logs/                            # 运行日志
+```
+
+`outputs/`、`logs/` 和虚拟环境已配置为 Git 忽略项。克隆仓库可获得已提交的数据与报告；模型权重、训练检查点及发布包需另行准备或运行流程生成。
+
+## 4. 数据说明
+
+### 4.1 数据来源与规模
+
+当前基线使用 `data/raw/基层党务（试用版）(1).docx`。各阶段保存的统计如下：
+
+| 处理环节 | 数量 | 说明 |
+| --- | ---: | --- |
+| 抽取记录 | 5,523 | 从 1 份 DOCX 文档抽取 |
+| 清洗后记录 | 5,433 | 剔除 4 条质量不合格记录、76 条精确重复和 10 条近重复 |
+| 语义单元 | 1,400 | 包含 FAQ、标题及其他文本单元 |
+| FAQ 配对 | 1,327 | 高置信度 1,318 条，中置信度 9 条 |
+| 有效 SFT 样本 | 1,303 | 剔除 12 组同问不同答冲突，共 24 条 |
+| 训练集 | 1,149 | 用于参数更新 |
+| 验证集 | 75 | 用于训练期间评估和检查点选择 |
+| 测试集 | 79 | 用于最终基座与微调模型对照 |
+
+统计来源：[抽取清单](data/extracted/manifest.json)、[清洗报告](data/processed/quality_report.json)、[分块报告](data/chunks/chunk_report.json)和[数据集报告](data/sft/dataset_report.json)。
+
+默认目标划分比例为 `90% / 5% / 5%`。程序按规范化问题生成分组键，并结合固定盐值 `qlora-sft-phase4-v1` 进行哈希分桶，因此实际条数不严格等于目标比例；相同问题保持在同一划分内。
+
+### 4.2 输入格式
+
+程序递归扫描输入目录，通过后缀识别文件类型，不依赖父目录名称。
+
+| 格式 | 支持的后缀 | 解析方式 |
+| --- | --- | --- |
+| PDF | `.pdf` | PyMuPDF 文本抽取 |
+| Word | `.docx` | python-docx |
+| Markdown、纯文本 | `.md`、`.markdown`、`.txt`、`.log` | 文本读取 |
+| HTML | `.html`、`.htm` | BeautifulSoup4 |
+| Excel、CSV | `.xlsx`、`.xlsm`、`.csv` | openpyxl、标准库 CSV |
+| JSON、JSONL | `.json`、`.jsonl` | 标准库 JSON |
+
+当前未实现 `.doc`、PowerPoint、音视频及图片 OCR；疑似扫描版 PDF 会记录 `possible_scanned_pdf` 警告。原始输入文件在处理过程中保持只读。
+
+### 4.3 样本结构与质量控制
+
+每条 SFT 样本包含 `sample_id`、`messages` 和 `metadata`。其中 `messages` 固定为一条 `user` 问题和一条 `assistant` 答案；`metadata` 保存语义单元标识、文件路径、文件 SHA256、源记录标识、标题路径及 FAQ 置信度，供审计追溯使用，不拼接进问答文本。
+
+数据质量控制包括：
+
+- 仅接收达到置信度阈值的 FAQ，默认阈值为 `medium`。
+- 对规范化后的问答进行精确去重；同一问题对应不同答案时，整组剔除。
+- 检查不同划分间的问题与完整样本是否重复，检查失败时终止构建。
+- 使用 Qwen3 聊天模板审计全部样本，验证提示词前缀匹配和非空回答监督区间。
+- 对生成的数据保留拒绝原因、重复关系和来源信息，便于定位质量问题。
+
+已保存的 [Tokenizer 报告](data/tokenizer/token_report.json)显示，1,303 条样本的最大完整序列长度为 **1,672 tokens**，在训练长度 `2048` 下覆盖率为 **100%**，提示词前缀不匹配和空回答监督区间均为 0。
+
+## 5. 环境与依赖
+
+### 5.1 运行条件
+
+文档处理和 Tokenizer 审计可在 CPU 上运行。模型训练、完整评估与发布重载验收使用支持 CUDA 和 BF16 的 NVIDIA GPU。已有正式训练记录使用 RTX 5090，设备显存约 31.84 GiB；该记录不代表其他显卡的最低资源要求。
+
+历史实验记录中的主要版本如下，供复现对照使用：
+
+| 组件 | 记录版本 |
+| --- | --- |
+| Python | 3.12.10 |
+| PyTorch / CUDA | `2.11.0+cu128` / `12.8` |
+| Transformers / TRL | `5.5.0` / `0.24.0` |
+| PEFT / bitsandbytes | `0.20.0` / `0.50.1` |
+| Accelerate / Datasets | `1.14.0` / `4.3.0` |
+| Unsloth / Unsloth Zoo | `2026.8.21` / `2026.8.15` |
+| Triton / xformers | `3.7.1` / `0.0.35` |
+
+版本来源：[训练运行清单](data/training/phase5c_b/run_manifest.json)与[测试评估运行记录](data/training/phase5d/PHASE5D_R_RESULT.md)。依赖文件主要声明版本下限，并非完整锁文件；在新环境中安装后，需要重新完成依赖检查与训练预检。
+
+### 5.2 安装
+
+以下命令在项目根目录执行，示例使用 Bash 和 Python 3.12：
 
 ```bash
-# 安装依赖
+python3.12 -m venv .venv
+source .venv/bin/activate
 python -m pip install -r requirements.txt
+```
 
-# 使用默认路径（data/raw → data/extracted/documents.jsonl + manifest）
+需要训练时，先安装与设备及驱动匹配的 PyTorch，再安装训练依赖。下面的 CUDA 12.8 wheel 与仓库记录的训练环境对应：
+
+```bash
+python -m pip install --index-url https://download.pytorch.org/whl/cu128 "torch==2.11.0"
+python -m pip install -r requirements-train.txt
+python -m pip install "unsloth==2026.8.21" "unsloth_zoo==2026.8.15"
+python -m pip check
+```
+
+`requirements-train.txt` 不固定 PyTorch，也不包含 Unsloth；正式训练所需的 Unsloth 需单独安装。上面的命令不会自动锁定表中所有依赖版本，复现实验时应进一步核对版本组合。
+
+正式训练、测试评估和发布加载使用以下基础模型版本：
+
+```text
+model_name: Qwen/Qwen3-8B
+revision: b968826d9c46dd6066d109eabc6255188de91218
+```
+
+Unsloth 加载路径使用本地缓存，测试评估脚本默认设置 Hugging Face 离线模式。首次运行前，应在可联网环境中准备该版本的模型和 Tokenizer：
+
+```bash
+python - <<'PY'
+from huggingface_hub import snapshot_download
+
+snapshot_download(
+    repo_id="Qwen/Qwen3-8B",
+    revision="b968826d9c46dd6066d109eabc6255188de91218",
+)
+PY
+```
+
+## 6. 使用流程
+
+各脚本默认将结果写入前述目录。重新执行数据构建、训练或评估会写入相应产物；需要保留历史实验时，应先保存现有结果，或使用脚本提供的路径参数指定独立输出位置。可通过 `python scripts/<脚本名>.py --help` 查看参数。
+
+### 6.1 文档处理与数据集构建
+
+将资料放入 `data/raw/`，依次执行：
+
+```bash
 python scripts/extract_documents.py
-
-# 自定义路径
-python scripts/extract_documents.py \
-  --input   data/raw \
-  --output  data/extracted/documents.jsonl \
-  --manifest data/extracted/manifest.json \
-  --log-file  logs/extract_documents.log \
-  --log-level INFO
-```
-
-### 输出
-
-| 路径 | 含义 |
-| --- | --- |
-| `data/extracted/documents.jsonl` | 统一格式抽取结果，每行一个 `DocumentRecord` |
-| `data/extracted/manifest.json` | 抽取统计：成功/失败/跳过、warnings、每文件的 SHA256 |
-| `logs/extract_documents.log` | 详细运行日志 |
-
-### 当前支持的格式
-
-| 后缀 | 类型 | 使用的库 |
-| --- | --- | --- |
-| `.pdf` | pdf | PyMuPDF (`fitz`) |
-| `.docx` | docx | python-docx |
-| `.md`, `.markdown` | markdown | 标准库 |
-| `.txt`, `.log` | text | 标准库 |
-| `.html`, `.htm` | html | BeautifulSoup4 |
-| `.xlsx`, `.xlsm` | excel | openpyxl |
-| `.csv` | csv | 标准库 `csv` |
-| `.json` | json | 标准库 `json` |
-| `.jsonl` | jsonl | 标准库 `json` |
-
-### 当前明确不支持
-
-- `.doc`、`.ppt`、`.pptx`
-- 图片 OCR（含扫描版 PDF 的 OCR）
-- 音频 / 视频
-- 联网爬虫 / Playwright / Selenium
-- 通过 LLM / 规则自动生成 QA
-- 任何形式的 SFT messages 生成 / 模型训练
-
-> 扫描版 PDF 会被识别并写入 `manifest.json` 的 `warnings: ["possible_scanned_pdf"]`，**不会调用 OCR**。后续会单独做 OCR Pipeline。
-
-### 设计原则
-
-- **统一数据模型**：`DocumentRecord` 是 Phase 1 的唯一记录结构。
-- **稳定 doc_id**：使用 `SHA256(relative_path + page/sheet/index + text)` 截取前 24 位，保证重复运行 doc_id 一致。
-- **相对路径**：所有 `source_path` 都使用项目内相对路径（POSIX 风格），便于跨机器迁移。
-- **文件 SHA256**：每个源文件单独计算 SHA256，存到 `DocumentRecord.file_sha256` 和 `manifest`。
-- **失败隔离**：单个文件失败不会中断整体任务，会在 `manifest.json` 记录 `failed`。
-- **空文本不输出**：纯空白记录不会写入 `documents.jsonl`，但会在 manifest 的 `warnings` 中体现。
-- **原子写入**：通过临时文件 + `os.replace` 保证 `documents.jsonl` / `manifest.json` 不会写到一半。
-- **不修改原始数据**：原始文件保持只读。
-
-### 运行测试
-
-```bash
-pip install pytest
-pytest
-```
-
-### Phase 1 文档结构
-
-```text
-src/data_pipeline/
-├── __init__.py
-├── models.py        # DocumentRecord, compute_doc_id
-├── utils.py         # SHA256, 路径处理, 文本规范化
-├── registry.py      # EXTRACTORS 表
-├── extractor.py     # Pipeline 编排 (run_pipeline)
-└── extractors/
-    ├── base.py
-    ├── pdf.py
-    ├── word.py
-    ├── markdown.py
-    ├── text.py
-    ├── html.py
-    ├── excel.py      # xlsx/xlsm + csv
-    └── jsonl.py      # json + jsonl
-```
-
----
-
-## 后续阶段（暂不实现）
-
-- Phase 5：Tokenizer Validation + QLoRA Training Preparation / Training。
-
----
-
-## Phase 2 — Document Cleaning
-
-Phase 2 在 Phase 1 的统一 JSONL 上做确定性文本清洗，**不会**调用任何 LLM / Embedding / 向量数据库，也不会构造 SFT 训练样本。
-
-### 数据流
-
-```text
-data/raw/**
-        ↓
-Phase 1 Extract
-        ↓
-data/extracted/documents.jsonl
-        ↓
-Phase 2 Clean
-        ↓
-文本规范化 (Unicode / 空白 / 中文断行 / 标点)
-        ↓
-结构识别 (chapter / section / heading / subheading / list_item / paragraph / table / unknown)
-        ↓
-质量检测 (长度、中文比例、symbol 比例、garbled 判定)
-        ↓
-规则过滤 (rejected_documents.jsonl)
-        ↓
-重复检测 (Exact SHA256 + 64-bit SimHash)
-        ↓
-data/processed/documents_clean.jsonl
-data/processed/rejected_documents.jsonl
-data/processed/duplicates.jsonl
-data/processed/quality_report.json
-```
-
-### 运行
-
-```bash
-# 默认（读 data/extracted → 写 data/processed）
 python scripts/clean_documents.py
-
-# 自定义路径
-python scripts/clean_documents.py \
-  --input   data/extracted/documents.jsonl \
-  --output  data/processed/documents_clean.jsonl \
-  --rejected data/processed/rejected_documents.jsonl \
-  --duplicates data/processed/duplicates.jsonl \
-  --report  data/processed/quality_report.json \
-  --log-file logs/clean_documents.log \
-  --log-level INFO
-
-# 可选调参
---min-length 5
---max-length 20000
---max-symbol-ratio 0.5
---simhash-distance 3
---disable-near-dedup
-```
-
-### 输出
-
-| 路径 | 含义 |
-| --- | --- |
-| `data/processed/documents_clean.jsonl` | 通过质量 + 去重的 records，附 `clean_text`、`structure_type`、`detected_section`、`quality`、`cleaning_actions` 等字段 |
-| `data/processed/rejected_documents.jsonl` | 被质量规则过滤的 records（含 `reject_reasons`） |
-| `data/processed/duplicates.jsonl` | exact + near duplicate，含 `canonical_doc_id` / `duplicate_doc_id` / `distance` |
-| `data/processed/quality_report.json` | 聚合统计（输入/输出/保留率、文本长度分布、结构计数、清洗动作、拒因、源文件分布等） |
-| `logs/clean_documents.log` | 详细运行日志 |
-
-### 关键规则
-
-- **确定性**：相同输入 + 相同配置 → 完全一致输出（不含时间戳）。
-- **可追溯**：Phase 1 原始 `text` 字段不会被覆盖；`clean_text` 单独保存。
-- **结构识别**：`第一章`/`第一节`/`一、`/`（一）`/`1.`/`（1）`/`①` 等正则在 *原始* 文本上运行，避免 NFKC 把全角括号 / 圈数字吃掉。
-- **SimHash**：64-bit，自实现 FNV-1a + CJK 字符 bigram，无外部依赖；按 top-16-bit 分桶避免 O(N²)。
-- **去重原则**：相同输入 → canonical record 稳定（按 `doc_id` 升序选首条）。
-- **保守清洗**：宁可少清洗也不误清洗；中文标点 `， 。 ！ ？ ； ： （ ）` 在 NFKC 之后会被还原为全角。
-- **Phase 2 仍不创建 SFT 训练样本**，不做 chunking，不调用任何 LLM。
-
-### Phase 2 模块结构
-
-```text
-src/data_pipeline/
-├── models.py            # Phase 1 DocumentRecord
-├── utils.py             # Phase 1 utilities
-├── extractor.py         # Phase 1 pipeline
-├── registry.py          # Phase 1 registry
-├── extractors/          # Phase 1 extractors
-└── cleaning/
-    ├── normalizer.py    # Unicode / 空白 / 标点 / 中文断行
-    ├── structure.py     # 结构识别 + section 上下文传播
-    ├── quality.py       # 质量指标 + header/footer 检测
-    ├── dedup.py         # Exact SHA256 + SimHash near-dedup
-    └── pipeline.py      # orchestrator (run_cleaning_pipeline)
-```
-
----
-
-## Phase 3 — Semantic Unit + FAQ Pairing + Structure-aware Chunking
-
-Phase 3 在 Phase 2 输出上恢复源文档 record 顺序，识别 FAQ 问答关系并构建语义单元，然后做结构感知 chunking。**Phase 3 只恢复源数据中已有的 FAQ 关系并构建结构化 chunk，不会调用 LLM、不会生成新的 QA 内容、不会生成 SFT messages、不会进行模型训练。**
-
-### 数据流
-
-```text
-data/raw/**
-        ↓
-Phase 1 Extract
-        ↓
-data/extracted/documents.jsonl
-        ↓
-Phase 2 Clean / Normalize / Filter / Dedup
-        ↓
-data/processed/documents_clean.jsonl
-        ↓
-Phase 3 Restore source order
-        ↓
-detect_question_candidate         ← 一个 detector：编号 / 段落 / 粘连题号
-        ↓
-pair_questions_with_answers       ← 一个 pairer：高 / 中 一次配对
-        ↓
-build_semantic_units              ← 一个 semantic unit 构造器
-        ↓
-build_chunks
-        ↓
-data/chunks/semantic_units.jsonl
-data/chunks/chunks.jsonl
-data/chunks/chunk_report.json
-data/chunks/faq_audit.jsonl       ← 仅观察：未配对的候选
-```
-
-### FAQ 主链（唯一）
-
-```text
-run_chunking_pipeline
-   ↓
-restore_source_order                          # ordering.py
-   ↓
-pair_questions_with_answers                   # faq.py
-   │   └── detect_question_candidate          # faq.py
-   ↓
-build_semantic_units                          # semantic_units.py
-   ├── _build_faq_units
-   └── _build_other_units
-   ↓
-_build_chunks                                 # pipeline.py
-   ↓
-build_report / build_audit_entries            # report.py / audit.py
-```
-
-历史上曾存在的"Phase 3.5 段落 FAQ 二次恢复"已合并回收。当前 detector 一次性覆盖：
-
-* **结构化编号**（`1.` / `1、` / `①` / `一、`）→ high（带问号）/ medium（带疑问词 / 中文编号+问号）
-* **粘连题号**（开头 1~3 位数字紧接中文，不接单位字）→ medium
-* **段落短问句**（长度合理 + `?` + 强疑问词）→ medium
-
-不再维护两条 pipeline 不再二次拆分。
-
-### 运行
-
-```bash
-# 默认（读 data/processed → 写 data/chunks）
 python scripts/build_chunks.py
-
-# 自定义路径与阈值
-python scripts/build_chunks.py \
-  --input         data/processed/documents_clean.jsonl \
-  --units-output  data/chunks/semantic_units.jsonl \
-  --chunks-output data/chunks/chunks.jsonl \
-  --report        data/chunks/chunk_report.json \
-  --log-file      logs/build_chunks.log \
-  --min-chars     100 \
-  --target-chars  800 \
-  --max-chars     1200 \
-  --overlap-chars 100 \
-  --faq-min-confidence medium
-```
-
-### 输出
-
-| 路径 | 含义 |
-| --- | --- |
-| `data/chunks/semantic_units.jsonl` | 语义单元（FAQ / heading / paragraph_group / list_group / standalone），含 `unit_id`、`unit_type`、`question_text`、`answer_text`、`source_doc_ids`、`source_record_indices` |
-| `data/chunks/chunks.jsonl` | 最终 chunk（faq / heading / text），含 `chunk_id`、`source_unit_ids`、`source_doc_ids`、`source_record_indices` |
-| `data/chunks/chunk_report.json` | 聚合统计：FAQ 配对数、置信度分布、长度分布、split / overlap 统计、可追溯性 |
-| `data/chunks/faq_audit.jsonl` | 审计旁路：未配对的候选（含已识别但无答案 / 低置信度），仅供人工核对 |
-| `logs/build_chunks.log` | 详细运行日志 |
-
-### 关键规则
-
-- **一个 Detection Path + 一个 Pairing Path**。所有候选（结构化 / 粘连 / 段落）共用 `detect_question_candidate`，共用 `pair_questions_with_answers`。
-- **精确量化后缀保护**：`100万元党费如何管理？` / `2026年党员教育工作重点是什么？` / `18岁以上人员能否申请入党？` 这类"数字+单位"的常见前缀**不会**被当作粘连题号剥离，规则以紧跟数字后的字符是否为常见单位字（万 / 元 / 岁 / 年 / % / 月 / 日 / 个 / 多 / 余）来区分。
-- **Precision > Recall**：自动配对只接受 high / medium 置信度；`（1）` / `（2）` 全角括号枚举不会误识别为问题。
-- **段落 FAQ 终止上一题**：检测器对段落短问句直接升级为 medium，因此上一道 FAQ 的答案范围会在此处自然终止；不再需要后处理拆分。
-- **FAQ 一对一**：一道 FAQ = 一个 `SemanticUnit` = 一个 `chunk`，不做切分；短 FAQ 也不与下一道合并。
-- **结构边界硬性**：chapter / section / heading / subheading 是硬边界，跨结构正文绝不合并。
-- **可追溯**：`unit_id` / `chunk_id` 由 SHA256(输入内容) 决定性生成；每个 chunk 都保留 `source_unit_ids`、`source_doc_ids`、`source_record_indices`，可一路回溯到原始 Phase 1 `DocumentRecord` 与源文件。
-- **确定性**：相同输入 + 相同配置 → SHA256 一致的输出文件，report 不含任何时间戳 / 当前时间字段。
-- **不调用 LLM / 不生成 SFT messages / 不训练模型**：Phase 3 严格止步于「数据结构恢复 + 结构化 chunking」。
-- **Audit 不参与业务控制流**：`pair_questions_with_answers` 直接返回 `unpaired` 候选，audit 只是把这份数据序列化为 JSONL，**不会**反过来驱动 SemanticUnit 重构。
-- **公共 IO**：所有原子写文件逻辑（`atomic_write_json` / `atomic_write_jsonl` / `load_jsonl_records`）只维护于 `src/data_pipeline/utils.py`，Phase 2 / Phase 3 全部复用。
-- **中文注释**：从 Phase 3 开始，所有新增/修改代码的注释、docstring、CLI 参数说明、日志内容均优先使用中文；类名 / 函数名 / 字段名 / JSON key / CLI 参数继续使用规范英文命名。
-
-### Phase 3 模块结构
-
-```text
-src/data_pipeline/
-├── models.py            # DocumentRecord (Phase 1)
-├── utils.py             # 共享：路径、SHA、规范化、原子 IO
-├── extractor.py         # Phase 1 编排
-├── registry.py
-├── extractors/
-├── cleaning/            # Phase 2
-│   ├── normalizer.py
-│   ├── structure.py
-│   ├── quality.py
-│   ├── dedup.py
-│   └── pipeline.py      # 复用 utils 的原子 IO
-└── chunking/            # Phase 3
-    ├── __init__.py
-    ├── models.py        # ChunkingConfig / SemanticUnit / Chunk / ID 生成
-    ├── ordering.py      # 源序恢复
-    ├── faq.py           # 唯一 detector + 唯一 pairer
-    ├── semantic_units.py# SemanticUnit 构建
-    ├── splitter.py      # 超长文本安全切分
-    ├── audit.py         # 旁路：序列化未配对候选
-    ├── report.py        # 报告
-    └── pipeline.py      # orchestrator
-```
-
----
-
-## Phase 4 — SFT Dataset Construction
-
-Phase 4 直接消费 Phase 3 产出的 `semantic_units.jsonl`，只取 `unit_type == "faq"` 的单元，**不重新 detect / pair FAQ**，**不调用任何 LLM**，**不加载 tokenizer**，**不训练模型**——只把已配对的 FAQ 转成标准 Chat-style SFT 数据并做数据质量审计与 Train/Val/Test 确定性划分。
-
-### 数据流
-
-```text
-data/raw/**
-        ↓
-Phase 1 Extract
-        ↓
-data/extracted/documents.jsonl
-        ↓
-Phase 2 Clean / Normalize / Filter / Dedup
-        ↓
-data/processed/documents_clean.jsonl
-        ↓
-Phase 3 Semantic Unit + FAQ + Chunking
-        ↓
-data/chunks/semantic_units.jsonl
-        ↓
-Phase 4 SFT Dataset Construction
-        ├── 只取 unit_type == "faq"
-        ├── 字段校验（unit_id / question / answer / confidence / traceability）
-        ├── sample_id = SHA256(unit_id + q + a)[:24]
-        ├── exact dedup（normalized q+a）
-        ├── question conflict（同问不同答 ⇒ 整组剔除）
-        ├── 确定性 split（split_group_key = SHA256(normalized_q), salt 固定）
-        ├── cross-split leakage 硬校验
-        ↓
-data/sft/all.jsonl
-data/sft/train.jsonl
-data/sft/validation.jsonl
-data/sft/test.jsonl
-data/sft/rejected.jsonl
-data/sft/dataset_report.json
-```
-
-### 运行
-
-```bash
-# 默认（读 data/chunks/semantic_units.jsonl → 写 data/sft/）
 python scripts/build_sft_dataset.py
-
-# 自定义路径与参数
-python scripts/build_sft_dataset.py \
-  --input             data/chunks/semantic_units.jsonl \
-  --all-output        data/sft/all.jsonl \
-  --train-output      data/sft/train.jsonl \
-  --validation-output data/sft/validation.jsonl \
-  --test-output       data/sft/test.jsonl \
-  --rejected-output   data/sft/rejected.jsonl \
-  --report            data/sft/dataset_report.json \
-  --log-file          logs/build_sft_dataset.log \
-  --min-confidence    medium \
-  --train-ratio       0.80 \
-  --validation-ratio  0.10 \
-  --test-ratio        0.10 \
-  --split-salt        qlora-sft-phase4-v1
 ```
 
-### 输出
+主要输出为 `data/extracted/documents.jsonl`、`data/processed/documents_clean.jsonl`、`data/chunks/semantic_units.jsonl` 和 `data/sft/{all,train,validation,test}.jsonl`。各阶段同时生成质量报告；构建完成后，应先检查拒绝样本、FAQ 配对结果及数据划分统计。
 
-| 路径 | 含义 |
-| --- | --- |
-| `data/sft/all.jsonl` | 通过质量校验的 accepted samples 全量（user + assistant） |
-| `data/sft/train.jsonl` | 训练集 |
-| `data/sft/validation.jsonl` | 验证集 |
-| `data/sft/test.jsonl` | 测试集 |
-| `data/sft/rejected.jsonl` | 被剔除的样本（含 `reject_reasons` / `canonical_sample_id`） |
-| `data/sft/dataset_report.json` | 数据质量报告（含 split 比例、长度分布、leakage、traceability 等） |
-| `logs/build_sft_dataset.log` | 详细运行日志 |
-
-### SFT Sample Schema
-
-```json
-{
-  "sample_id": "sft_xxxxxxxxxxxxxxxxxxxxxxxx",
-  "messages": [
-    {"role": "user", "content": "党员应当履行哪些义务？"},
-    {"role": "assistant", "content": "党员应当……"}
-  ],
-  "metadata": {
-    "unit_id": "unit_...",
-    "source_path": "...",
-    "file_name": "...",
-    "file_sha256": "...",
-    "source_doc_ids": ["doc_..."],
-    "source_record_indices": [2, 3],
-    "faq_confidence": "high",
-    "structure_path": ["一、基层党组织的设置"],
-    "detected_section": "一、基层党组织的设置",
-    "question_record_index": 2,
-    "answer_record_count": 1,
-    "number_style": "arabic_dot"
-  }
-}
-```
-
-### 关键规则
-
-- **只消费 `unit_type == "faq"`**：heading / subheading / paragraph_group / list_group / standalone 一律不进入 SFT。
-- **内容零修改**：`user.content == question_text.strip()`，`assistant.content == answer_text.strip()`；不增加"问题："/"答案："前缀；不增加 system / tool / developer 消息。
-- **sample_id 稳定**：`SHA256(unit_id + question + answer)` 截前 24 位；同一输入重复运行必须一致；禁止 UUID / random / timestamp。
-- **Exact dedup**：`normalized(q) + normalized(a)` 相同的样本只保留 1 条 canonical（按 sample_id 升序选首条）。
-- **Question conflict**：同问不同答 ⇒ 该组所有样本**整组剔除**，不进入训练集，不静默通过。
-- **确定性 split**：按 `split_group_key = SHA256(normalized_question)` 避免同问跨 split；`split_salt` 默认 `qlora-sft-phase4-v1`，必须显式持久化在 report 中。
-- **Leakage 硬校验**：`cross_split_question = 0` 且 `cross_split_exact_sample = 0`；否则 pipeline 失败，不只 warning。
-- **不调用 LLM / 不加载 tokenizer / 不训练模型**：Phase 4 严格止步于「FAQ → messages → 质量审计 → 划分」。
-- **公共 IO**：所有原子写文件逻辑（`atomic_write_json` / `atomic_write_jsonl` / `load_jsonl_records`）只维护于 `src/data_pipeline/utils.py`，Phase 1 / 2 / 3 / 4 全部复用。
-- **中文注释**：所有新增/修改代码的注释、docstring、CLI 参数说明、日志内容均优先使用中文；类名 / 函数名 / 字段名 / JSON key / CLI 参数继续使用规范英文命名。
-- **类字段中文注释强制**：所有新增 dataclass / class 的每一个字段前必须存在独立中文说明注释（每个字段一行）。后续 `test_sft_dataclasses_have_chinese_field_comments` 会扫描整个 `src/data_pipeline/sft/` 下所有 dataclass，新增字段无需手改测试。
-
-### Phase 4 模块结构
-
-```text
-src/data_pipeline/
-└── sft/
-    ├── __init__.py
-    ├── models.py        # SFTBuildConfig / SFTSample
-    └── pipeline.py      # run_sft_pipeline（唯一入口）
-
-scripts/
-└── build_sft_dataset.py  # CLI
-
-tests/
-└── test_sft_dataset.py   # 单元测试（FAQ→messages、字段校验、dedup、conflict、split、leakage、accounting、原子写、确定性、类字段中文注释约定）
-```
-
-### 后续阶段（暂不实现）
-
-- Phase 5C：完整 epoch 训练、packing、checkpoint 调度、最终评测（Phase 5B 不实现）。
-
----
-
-## Phase 5A — Qwen3 Tokenizer Validation
-
-Phase 5A 直接消费 Phase 4 的 `data/sft/`，**只**调用 `AutoTokenizer.apply_chat_template` 做训练前 token 长度审计；不加载 `AutoModelForCausalLM`、不初始化 CUDA、不训练模型、不生成任何训练样本的 `input_ids` / `attention_mask` / `labels`。
-
-### 数据流
-
-```text
-data/sft/
-    ├── all.jsonl
-    ├── train.jsonl
-    ├── validation.jsonl
-    └── test.jsonl
-        ↓
-Phase 5A Tokenizer Audit
-    ├── 校验 split membership（all ⊆ train ∪ validation ∪ test，互斥）
-    ├── 加载 Qwen3 tokenizer（AutoTokenizer, use_fast=True, trust_remote_code=False）
-    ├── synthetic messages 渲染 + roundtrip 验证
-    ├── 扫描 source messages 中是否有 <think> / </think> / reasoning_content 痕迹
-    ├── 逐 sample:
-    │     apply_chat_template(messages, add_generation_prompt=False, enable_thinking=False)
-    │     apply_chat_template(messages[:1], add_generation_prompt=True, enable_thinking=False)
-    │     校验 prompt prefix match + assistant_target_tokens > 0
-    ├── 长度统计（min/mean/median/p90/p95/p99/max，full / prompt / assistant_target）
-    ├── split 统计（train / validation / test 各自 count + mean/p95/max）
-    ├── 候选 max_seq_length coverage（512 / 1024 / 1536 / 2048 / 3072 / 4096）
-    ├── 95% / 99% / 100% coverage threshold
-    └── longest 20 samples（仅定位 metadata，不复制答案）
-        ↓
-data/tokenizer/token_audit.jsonl
-data/tokenizer/token_report.json
-logs/audit_token_lengths.log
-```
-
-### 运行
+### 6.2 Tokenizer 审计与环境验证
 
 ```bash
-# 安装依赖
-pip install -r requirements.txt
-
-# 默认（读 data/sft → 写 data/tokenizer/，加载 Qwen/Qwen3-8B tokenizer）
-python scripts/audit_token_lengths.py
-
-# 自定义路径 / 模型仓库
 python scripts/audit_token_lengths.py \
-    --sft-dir     data/sft \
-    --model-name  Qwen/Qwen3-8B \
-    --revision    main \
-    --output-audit   data/tokenizer/token_audit.jsonl \
-    --output-report  data/tokenizer/token_report.json \
-    --log-file       logs/audit_token_lengths.log \
-    --log-level      INFO
+  --model-name Qwen/Qwen3-8B \
+  --revision b968826d9c46dd6066d109eabc6255188de91218
+
+python scripts/check_training_env.py
+python scripts/smoke_train_qlora.py --backend unsloth
 ```
 
-### 输出
+Tokenizer 审计仅加载 Tokenizer 及相关配置，不加载模型权重。环境预检检查依赖、CUDA、BF16 和实际矩阵计算；冒烟测试加载模型并运行 1 个优化器步骤，验证训练、保存、重载和最小推理链路。
 
-| 路径 | 含义 |
-| --- | --- |
-| `data/tokenizer/token_audit.jsonl` | 每条 accepted SFT 样本一条轻量审计记录（不含 `input_ids` / 原文） |
-| `data/tokenizer/token_report.json` | 汇总：模型/tokenizer 元数据、长度统计、split 统计、coverage、threshold、longest 20、source thinking 扫描 |
-| `logs/audit_token_lengths.log` | 详细运行日志 |
+冒烟脚本也支持 `--backend hf`。其配置默认从 `main` 解析模型 revision，具体解析结果写入运行报告；正式训练采用上文固定的 revision，复现时应核对两者记录。
 
-### 关键规则
-
-- **只加载 `AutoTokenizer`**（+ 可选 `AutoConfig`），**不**加载 `AutoModelForCausalLM`，**不**调用 `torch.cuda`。
-- **唯一真值**：`tokenizer.apply_chat_template(...)`；**禁止**手工拼 ChatML、维护第二份 chat template、手工 `replace("<think>", "")`。
-- **Non-thinking SFT**：固定 `enable_thinking=False`；不暴露 `enable_thinking=True` 作为训练路径。
-- **Full conversation**：`add_generation_prompt=False`；**Prompt only**：`add_generation_prompt=True`。
-- **不裁、不填**：`truncation=False`、`padding=False`，只统计 raw `len(input_ids)`。
-- **Prefix property**：`full[:len(prompt)] == prompt` 必须对所有 accepted sample 成立，否则 `assistant_only_loss_feasible=False`。
-- **不修改 SFT 数据**：不重写 `messages`、不动 Phase 1/2/3/4 任何上游文件。
-- **不构造 `labels` / `attention_mask`**：仅判定未来能否安全做 assistant-only loss；具体 collator 留给 Phase 5B。
-- **确定性**：相同 SFT 数据 + 相同 tokenizer revision + 相同 config ⇒ `token_audit.jsonl` 与 `token_report.json` byte-for-byte 一致；report 不含任何 `timestamp` / `runtime` / `hostname`。
-- **不决定 max_seq_length**：只报告 95/99/100% 覆盖候选；最终训练长度由 Phase 5B 综合显存 / batch / 业务决定。
-- **不启用 YaRN / 不修改 rope_scaling**：本阶段只读模型 config。
-- **类字段中文注释强制**：本阶段新增的 `dataclass` 字段前必须有独立中文说明（与 Phase 4 同约定）。
-- **公共 IO**：所有原子写文件逻辑继续复用 `src/data_pipeline/utils.py` 的 `atomic_write_json` / `atomic_write_jsonl` / `load_jsonl_records`。
-
-### Phase 5A 模块结构
-
-```text
-src/data_pipeline/
-└── tokenization/
-    ├── __init__.py
-    ├── models.py        # TokenizerAuditConfig
-    └── pipeline.py      # run_tokenizer_audit（唯一入口）
-
-scripts/
-└── audit_token_lengths.py  # CLI
-
-tests/
-└── test_tokenizer_audit.py # 单元测试 + FakeTokenizer（默认不联网）
-                              # 真实 Qwen3 tokenizer 集成测试需
-                              # RUN_QWEN_TOKENIZER_INTEGRATION=1
-```
-
----
-
-## Phase 5B — QLoRA Runtime Preflight + One-Step Smoke Training
-
-Phase 5B 是正式 QLoRA 训练前的最后一个工程验证阶段。**只跑 1 个 optimizer step**，目的是用真实 8B 模型证明：
-
-- Phase 5A token_report 数据未被破坏；
-- 当前 RTX 5090 / CUDA / PyTorch / bitsandbytes 环境可工作；
-- 4-bit NF4 + LoRA + `assistant_only_loss=True` 链路可完整执行 `forward → loss → backward → optimizer step`；
-- adapter 可 reload 并完成最小推理。
-
-**不**做完整 epoch 训练、**不**做超参搜索、**不**保存 merged 模型。
-
-### 数据流
-
-```text
-data/sft/train.jsonl
-data/sft/validation.jsonl
-data/tokenizer/token_report.json
-data/tokenizer/token_audit.jsonl
-        ↓
-Phase 5B QLoRA Smoke
-        ├── 复算 Phase 5A gate（不允许 max_tokens > 2048、membership 不一致、thinking marker 等）
-        ├── 检查 torch / transformers / trl / peft / accelerate / datasets / bitsandbytes
-        ├── 检查 CUDA availability + BF16 + Blackwell (sm_120)
-        ├── 真实 BF16 matmul 计算测试
-        ├── 加载 Qwen/Qwen3-8B（4-bit NF4 + double quant + bfloat16 compute）
-        ├── 验证 model.is_loaded_in_4bit / Linear4bit > 0
-        ├── prepare_model_for_kbit_training + LoRA r=16 alpha=32 all-linear
-        ├── 选 smoke 样本：sample_id 升序前 7 条 + train P95 附近 1 条（共 8 条）
-        ├── 构造 datasets.Dataset（messages-only）
-        ├── 检查 TRL assistant_only_loss=True 的 labels 同时含 -100 与非 -100 token（3 条）
-        ├── SFTTrainer.train(max_steps=1) — 必须 global_step == 1
-        ├── 保存 LoRA adapter
-        ├── 释放显存 + 重新 4-bit load + PeftModel.from_pretrained
-        ├── 最小推理验证（"什么是基层党组织？"）
-        ↓
-data/training/smoke_config.json
-data/training/smoke_report.json
-outputs/phase5b-smoke/adapter/
-logs/smoke_train_qlora.log
-```
-
-### 运行
+### 6.3 正式训练
 
 ```bash
-# 1) 安装训练依赖（torch 单独按 CUDA wheel 安装）
-pip install -r requirements-train.txt
-
-# 2) 仅检查依赖 + GPU + BF16 + Blackwell（不下载 8B 模型）
-python scripts/check_training_env.py
-
-# 3) 运行 1-step smoke 训练（首次会下载 Qwen/Qwen3-8B 权重到 ~/.cache/huggingface）
-python scripts/smoke_train_qlora.py
+python scripts/train_qlora_sft.py
 ```
 
-### 配置（固定）
+默认流程先执行 30 步批大小预检，再进行 3 个 epoch 的正式训练，每个 epoch 运行验证评估并保存检查点，按最低验证损失选择最佳 Adapter。批大小预检可按脚本规则回退，并记录最终配置。
 
-| 维度 | 值 | 备注 |
-| --- | --- | --- |
-| 模型 | `Qwen/Qwen3-8B` | 与 Phase 5A 一致 |
-| 量化 | `load_in_4bit=True`, `nf4`, `double quant=True` | 固定 NF4，禁止 FP4 / INT8 / GPTQ / AWQ |
-| 计算 dtype | `bfloat16` | 禁止退回 fp16 |
-| max_length | `2048` | 与数据真实最大 1672 匹配，禁止自动降低 |
-| LoRA | `r=16, alpha=32, dropout=0.05, bias=none, all-linear` | Phase 5B 禁止超参搜索 |
-| per_device_train_batch_size | `1` | |
-| gradient_accumulation_steps | `1` | |
-| max_steps | `1` | smoke 限定，禁止多 step |
-| assistant_only_loss | `True` | TRL 内置 |
-| packing | `False` | Phase 5B 禁止 |
-| gradient_checkpointing | `True` | |
-| seed | `42` | |
+训练产物写入 `outputs/phase5c-b/`，运行清单和最终报告写入 `data/training/phase5c_b/`。已有检查点时，可使用：
 
-### 关键规则
+```bash
+python scripts/train_qlora_sft.py --resume-from-checkpoint latest
+```
 
-- **必须先过 Phase 5A gate**：`token_report.json` 的 membership / membership missing / assistant_only_loss_feasible / prompt_prefix_mismatch / zero_assistant_target / thinking markers / max ≤ 2048 任何一项不满足，立即停止。
-- **不重新生成 SFT 数据**：只读 `data/sft`、`data/tokenizer`；不修改 Phase 1~4 任何上游文件。
-- **不构造第二套 collator / labels**：依赖 TRL 当前版本的 `assistant_only_loss=True`；若 TRL 无法产生正确 mask，立即停止 `TRL_ASSISTANT_MASK_UNAVAILABLE`。
-- **不实现 model_factory / trainer_factory / quantization_manager**： 只有 1 个 `QLoRASmokeConfig` dataclass。
-- **不保存 merged 模型**：只保存 LoRA adapter；reload 后只做最小推理验证。
-- **不修改 Qwen3 chat template**：`enable_thinking=False` 由官方 tokenizer 处理；禁止手工 `replace("<think>", "")`。
-- **smoke_report.json 不要求 byte-deterministic**：GPU 显存 / loss / kernel 略有差异；`smoke_config.json` 必须 deterministic。
-- **类字段中文注释强制**：与 Phase 4 / 5A 同约定，新增 dataclass 每个字段必须有中文说明。
+当前正式训练与验收脚本围绕已记录基线设置了 Tokenizer 审计签名、测试集条数和最佳检查点等约束。更换数据集或模型属于新实验，需要同步审查这些约束和评估协议，不能仅替换输入文件后沿用原有结果。
 
-### Phase 5B 模块结构
+### 6.4 测试评估与发布
+
+完成训练并确认最佳检查点后，依次执行：
+
+```bash
+python scripts/verify_best_adapter.py
+python scripts/evaluate_qlora_test.py
+python scripts/finalize_qlora_release.py
+```
+
+当前默认基线的最佳检查点为 `checkpoint-288`。验证脚本比较其与 `best_adapter` 的张量内容；评估脚本对基座模型与最佳 Adapter 使用相同测试样本和冻结协议，输出损失、生成指标、逐条预测及对比分析。评估中断后可使用 `--resume` 继续。
+
+发布脚本重新检查评估结果与 Adapter 来源，生成发布包和 SHA256 校验和，再从发布目录重载模型并执行 3 条非测试集问题的推理验收。发布结果写入 `outputs/phase5e/release/`，验收报告写入 `data/training/phase5e/`。
+
+## 7. 训练配置与实验结果
+
+### 7.1 正式训练配置
+
+| 配置项 | 已记录值 |
+| --- | --- |
+| 基础模型 | `Qwen/Qwen3-8B`，固定 revision |
+| 训练后端 | Unsloth + TRL SFTTrainer |
+| 量化 | 4-bit NF4，double quantization |
+| 计算精度 | BF16 |
+| LoRA | `r=16`、`alpha=32`、`dropout=0.05`、`bias=none` |
+| 目标模块 | `all-linear`，252 个 LoRA 层 |
+| 可训练参数 | 43,646,976 |
+| 最大序列长度 | 2048 |
+| Epoch / 总优化步骤 | 3 / 432 |
+| 单设备批大小 / 梯度累积 | 8 / 1，有效批大小为 8 |
+| 学习率 / 调度 | `1e-4` / linear |
+| 预热比例 / 权重衰减 | `0.03` / `0.0` |
+| 随机种子 | `seed=42`、`data_seed=42` |
+| 回答区域损失 / Packing | `assistant_only_loss=True` / `False` |
+| 最佳检查点选择 | 按 epoch 评估，以最低 `eval_loss` 选优 |
+
+完整配置与运行结果见[运行清单](data/training/phase5c_b/run_manifest.json)和[训练最终报告](data/training/phase5c_b/final_report.json)。
+
+### 7.2 验证集结果
+
+| 阶段 | 验证损失 |
+| --- | ---: |
+| 训练前 | 2.1087 |
+| Epoch 1 | 1.1644 |
+| Epoch 2 | **1.1594** |
+| Epoch 3 | 1.1902 |
+
+最佳结果来自 **Epoch 2 / checkpoint-288**，相对训练前下降约 45.02%。最终发布采用该检查点对应的 Adapter；[权重验证记录](data/training/phase5c_b/best_adapter_verification.json)记录了 504 个 Adapter 张量的一致性检查结果。
+
+### 7.3 保留测试集结果
+
+以下结果来自 [Phase 5D 评估报告](data/training/phase5d/phase5d_report.json)。基座与微调模型均评估 79 条样本，采用 `do_sample=False`、`enable_thinking=False`、`max_new_tokens=1610`；完整协议见[评估清单](data/training/phase5d/eval_manifest.json)。
+
+| 指标 | 基座模型 | 微调模型 |
+| --- | ---: | ---: |
+| 测试损失，越低越好 | 1.9303 | **1.2241** |
+| 测试困惑度，越低越好 | 6.8916 | **3.4010** |
+| 平均字符级 F1，越高越好 | 0.2702 | **0.3753** |
+| 平均 ROUGE-L F1，越高越好 | 0.1447 | **0.2626** |
+| 空生成率 | 0.00% | 0.00% |
+| 生成长度触顶率 | 0.00% | 11.39% |
+
+按[逐样本配对统计](data/training/phase5d/paired_metrics.json)，微调模型在字符级 F1 上胜出 53 条、落后 26 条；在 ROUGE-L 上胜出 61 条、落后 18 条，两项均无平局。字符级 F1 和 ROUGE-L 衡量与参考答案的文本重叠，不能直接视为事实正确率。
+
+[泄漏审计](data/training/phase5d/leakage_audit.json)记录的样本标识、问题及完整消息精确重叠均为 0，同时发现 **1 条与训练样本高度相似的测试样本**，相似度为 0.967。微调模型另有 **9 条生成达到长度上限**。这些情况应与总体提升一并考虑；逐条结果见[预测文件](data/training/phase5d/test_predictions.jsonl)和[定性对比](data/training/phase5d/qualitative_review.md)。
+
+## 8. 模型交付与使用
+
+### 8.1 发布包
 
 ```text
-src/data_pipeline/
-└── training/
-    ├── __init__.py
-    ├── models.py        # QLoRASmokeConfig（冻结）
-    └── pipeline.py      # evaluate_phase5a_gate / select_smoke_samples / load_token_*
-
-scripts /
-├── check_training_env.py    # 环境预检（CPU 即可，依赖检查 + GPU 信息）
-└── smoke_train_qlora.py     # 1-step 真实训练冒烟测试（GPU only）
-
-tests /
-└── test_training_pipeline.py
+outputs/phase5e/release/
+├── adapter/                         # LoRA 权重、配置及 Tokenizer 文件
+├── training_summary.json
+├── evaluation_summary.json
+├── release_manifest.json
+├── MODEL_CARD.md
+├── RELEASE_README.md
+└── checksums.sha256
 ```
 
-### 后续阶段（暂不实现）
+发布包包含 Adapter，加载时需同时提供固定版本的 Qwen3-8B 基座。[发布验收报告](data/training/phase5e/project_completion_report.md)记录了 Adapter 来源验证、3 条问题的非空推理结果及交付文件清单；重建发布包后，应以本次生成的报告和校验结果为准。
 
-- Phase 5C：完整 QLoRA SFT 训练（多 epoch / packing / checkpoint / 评测）。Phase 5B 已验证链路即可推进。
+### 8.2 加载示例
+
+准备好训练依赖、基础模型缓存及发布目录后，可使用 Transformers 和 PEFT 加载：
+
+```python
+import torch
+from peft import PeftModel
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+
+base_model = "Qwen/Qwen3-8B"
+revision = "b968826d9c46dd6066d109eabc6255188de91218"
+adapter_dir = "outputs/phase5e/release/adapter"
+
+quantization = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_quant_type="nf4",
+    bnb_4bit_use_double_quant=True,
+    bnb_4bit_compute_dtype=torch.bfloat16,
+)
+tokenizer = AutoTokenizer.from_pretrained(
+    base_model, revision=revision, local_files_only=True,
+)
+model = AutoModelForCausalLM.from_pretrained(
+    base_model,
+    revision=revision,
+    quantization_config=quantization,
+    dtype=torch.bfloat16,
+    device_map="auto",
+    local_files_only=True,
+)
+model = PeftModel.from_pretrained(model, adapter_dir)
+model.eval()
+
+prompt = tokenizer.apply_chat_template(
+    [{"role": "user", "content": "什么是基层党组织？"}],
+    tokenize=False,
+    add_generation_prompt=True,
+    enable_thinking=False,
+)
+inputs = tokenizer(
+    prompt, return_tensors="pt", add_special_tokens=False,
+).to(model.device)
+with torch.inference_mode():
+    output = model.generate(
+        **inputs,
+        max_new_tokens=512,
+        do_sample=False,
+        pad_token_id=tokenizer.eos_token_id,
+    )
+answer_tokens = output[0, inputs["input_ids"].shape[1]:]
+print(tokenizer.decode(answer_tokens, skip_special_tokens=True))
+```
+
+示例的生成长度用于交互演示，与正式评估中的 `1610` 不同。模型说明及更多交付信息见[模型卡](docs/MODEL_CARD.md)。
+
+## 9. 测试与复现
+
+安装测试依赖后运行：
+
+```bash
+python -m pip install pytest
+python -m pytest -q
+```
+
+测试覆盖文档抽取、清洗、FAQ 配对、数据划分、Tokenizer 审计、训练配置、后端接口、评估协议和发布校验。真实 Qwen3 Tokenizer 集成测试默认跳过，可显式开启：
+
+```bash
+RUN_QWEN_TOKENIZER_INTEGRATION=1 python -m pytest -q \
+  tests/test_tokenizer_audit.py -k test_qwen3_tokenizer_integration
+```
+
+常规测试通过不等于完成真实 GPU 训练或模型质量验收；后者需执行相应运行脚本。复现已记录结果时，应核对基础模型 revision、数据集文件 SHA256、Tokenizer 审计签名、运行清单中的依赖与训练配置，以及冻结的评估协议。
+
+为便于关联代码与产物，仓库沿用以下阶段标识：
+
+| 标识 | 对应工作 |
+| --- | --- |
+| Phase 1–4 | 文档抽取、清洗、语义处理与 SFT 数据构建 |
+| Phase 5A / 5B | Tokenizer 审计与单步训练验证 |
+| Phase 5C-A / 5C-B | 训练后端对比与正式训练 |
+| Phase 5D | 保留测试集评估 |
+| Phase 5E | Adapter 发布与交付验收 |
+
+## 10. 适用边界
+
+当前实验数据来自单份基层党务文档，测试集也由同一来源划分，尚不能据此证明跨文档、跨主题或新增政策知识的泛化能力。模型输出适合研究验证与辅助使用，涉及具体业务结论时应核对原始资料和现行依据。
+
+项目尚未提供 OCR、自动知识更新、线上服务及合并模型导出流程。扩展数据来源、调整训练配置或增加部署形态时，需要建立对应的数据审计、独立评估和运行验证。
+
+本仓库未提供项目级 `LICENSE` 文件；基础模型、依赖组件及原始资料的使用与再分发，应分别核对其许可和授权条件。
